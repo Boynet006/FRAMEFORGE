@@ -10,9 +10,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import get_settings
 from app.main import app
 from app.plan import Character, Environment, Line, ProductionPlan, Scene, Voice
-from app.services.engines.tts_engine import TTSEngine, TTSError
+from app.services.engines.delivery import gap_after
+from app.services.engines.tts_engine import MIN_SPACING_S, TTSEngine, TTSError
 
 
 def _plan() -> ProductionPlan:
@@ -51,9 +53,11 @@ def test_fake_engine_layout_and_mix(tmp_path: Path):
     tl = json.loads((tmp_path / "audio" / "dialogue.json").read_text())
     lines = tl["lines"]
     assert [l["id"] for l in lines] == ["s1l1", "s1l2", "s2l1"]
-    # monotonic, non-overlapping; lead-in, pauses, tail and scene establishing gap respected
+    # lead-in, conversational gap (delivery.gap_after), tail and scene establishing gap respected
     assert lines[0]["start_s"] == 1.5
-    assert lines[1]["start_s"] >= lines[0]["end_s"] + 0.3 - 1e-6
+    gap = gap_after("Hello there, how are you today?", "neutral", "Fine. Mostly.", "neutral", False, "s1l1")
+    assert 0.1 < gap < 0.35                      # an answer to a question comes quickly
+    assert abs(lines[1]["start_s"] - (lines[0]["end_s"] + gap)) < 0.002
     assert lines[2]["start_s"] >= lines[1]["end_s"] + 0.6 + 1.0 - 1e-6
     assert tl["duration_s"] >= lines[2]["end_s"]
     assert len(tl["scenes"]) == 2
@@ -68,6 +72,71 @@ def test_fake_engine_layout_and_mix(tmp_path: Path):
         assert abs(mix.getnframes() / 24000 - (tl["duration_s"] + 0.5)) < 0.01
     for l in lines:
         assert (tmp_path / l["file"]).is_file()
+
+
+def test_interruption_overlaps_and_mix_sums(tmp_path: Path):
+    plan = _plan()
+    plan.scenes[0].lines[0].text = "I was just about to say—"
+    plan.scenes[0].lines[1].text = "Wait, what?"
+    engine = TTSEngine(sys.executable, engine="fake", room_mix=False)
+    result = asyncio.run(engine.run(plan, tmp_path, progress=_noop))
+    assert result["room_mix"] == {"applied": False, "reason": "disabled"}
+    tl = json.loads((tmp_path / "audio" / "dialogue.json").read_text())
+    a, b = tl["lines"][0], tl["lines"][1]
+    assert b["start_s"] < a["end_s"]                                  # cut off: reply overlaps the tail
+    assert b["start_s"] >= a["start_s"] + MIN_SPACING_S - 1e-6
+    # room mix off: the dry track is the dialogue track
+    assert (tmp_path / "audio" / "dialogue.wav").read_bytes() == (tmp_path / "audio" / "dialogue_dry.wav").read_bytes()
+
+
+def test_mix_sums_overlapping_lines(tmp_path: Path):
+    audio = tmp_path / "audio"
+    audio.mkdir()
+    for name, value in (("x.wav", 1000), ("y.wav", 1500)):
+        with wave.open(str(audio / name), "wb") as w:
+            w.setnchannels(1), w.setsampwidth(2), w.setframerate(24000)
+            w.writeframes(int(value).to_bytes(2, "little", signed=True) * 24000)   # 1 s constant level
+    timeline = {"duration_s": 2.0, "lines": [{"file": "audio/x.wav", "start_s": 0.0},
+                                              {"file": "audio/y.wav", "start_s": 0.5}]}
+    TTSEngine._mix(audio, timeline, 24000)
+    with wave.open(str(audio / "dialogue_dry.wav"), "rb") as w:
+        data = w.readframes(w.getnframes())
+    at = lambda s: int.from_bytes(data[int(s * 24000) * 2:int(s * 24000) * 2 + 2], "little", signed=True)  # noqa: E731
+    assert (at(0.25), at(0.75), at(1.25), at(1.75)) == (1000, 2500, 1500, 0)
+
+
+_SETTINGS = get_settings()
+_CHATTERBOX = Path(_SETTINGS.resolved_chatterbox_python)
+_WORKERS = Path(_SETTINGS.resolved_tts_python)
+
+
+@pytest.mark.skipif(not _CHATTERBOX.exists() or not _WORKERS.exists(),
+                    reason="Chatterbox venv (scripts/install-chatterbox.ps1) and worker venv are required")
+def test_chatterbox_real_voices(tmp_path: Path):
+    """Real engine: Kokoro reference clips -> Chatterbox cloned, emotion-driven lines -> room mix."""
+    plan = _plan()
+    plan.scenes[0].lines[1].emotion = "annoyed"
+    engine = TTSEngine(str(_WORKERS), engine="chatterbox", chatterbox_python=str(_CHATTERBOX))
+    result = asyncio.run(engine.run(plan, tmp_path, progress=_noop))
+    assert result["engine"] == "chatterbox" and result["lines"] == 3
+    assert result["room_mix"]["applied"] is True and result["room_mix"]["rooms"] == {"s1": "small", "s2": "small"}
+    for v in ("af_heart", "am_michael"):
+        assert (tmp_path / "audio" / "voices" / f"ref_{v}.wav").stat().st_size > 24000 * 2 * 5  # >5 s reference
+    job = json.loads((tmp_path / "audio" / "tts_job.json").read_text())
+    assert job["lines"][1]["exaggeration"] > job["lines"][0]["exaggeration"]               # annoyed > neutral
+    tl = json.loads((tmp_path / "audio" / "dialogue.json").read_text())
+    for line in tl["lines"]:
+        with wave.open(str(tmp_path / line["file"]), "rb") as w:
+            assert w.getframerate() == 24000 and w.getnchannels() == 1
+            assert 0.3 < w.getnframes() / 24000 < 8
+    with wave.open(str(tmp_path / "audio" / "dialogue.wav"), "rb") as w:
+        assert w.getnchannels() == 2                                                      # room mix is stereo
+
+
+def test_chatterbox_missing_is_a_clear_error(tmp_path: Path):
+    engine = TTSEngine(sys.executable, engine="chatterbox", chatterbox_python=str(tmp_path / "nope.exe"))
+    with pytest.raises(TTSError, match="install-chatterbox"):
+        asyncio.run(engine.run(_plan(), tmp_path, progress=_noop))
 
 
 def test_worker_failure_is_reported(tmp_path: Path):

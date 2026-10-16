@@ -134,6 +134,26 @@ Outstanding:
   assemble QC passed (57.7 s, 12 cues). GPU mode never uses two-shots (one face per spoken shot) and
   frames medium shots tighter (MEDIUM_SCALE 1.0) so mouths have enough pixels.
 - Install: `scripts\install-comfyui-gpu.ps1 -S2V` downloads the ~24 GB of S2V models.
+- **Voice upgrade (built and tested, not yet compared by ear):**
+  - `FRAMEFORGE_TTS_ENGINE=chatterbox` (or `POST /projects/{id}/tts?engine=chatterbox`): Resemble
+    Chatterbox 0.1.7 (MIT) in `backend/.venv-chatterbox` (`scripts\install-chatterbox.ps1`; torch 2.6
+    cu124, so RTX 40xx only; RTX 50xx needs Python 3.14 + torch>=2.9). Each character's voice is
+    cloned from a ~10 s reference read by its Kokoro voice (`audio/voices/ref_<voice>.wav`, cached);
+    each line's emotion sets exaggeration/cfg_weight (`engines/delivery.py`). Output carries
+    Resemble's imperceptible Perth watermark. Chatterbox model (~3 GB) downloads on first use.
+  - Both engines: edge silence trimmed; Kokoro speed follows the emotion.
+  - Natural timing (`delivery.gap_after`): quick comebacks after questions/interjections, a beat
+    before sad or calm replies, slight overlap when a line ends cut off ("—"), deterministic jitter;
+    lines are summed so overlaps play both voices. Replaces the uniform `pause_after_s`.
+  - Room mix (`media_worker/room_worker.py`): per-scene synthetic reverb (outdoor none / small
+    ~0.35 s / large ~1.3 s, from the environment description), stereo, 80 Hz high-pass ->
+    `audio/dialogue.wav` (dry copy in `dialogue_dry.wav`). Assembly adds dialogue compression,
+    music ducking under speech (sidechain) and -16 LUFS loudness normalisation.
+  - Tests: 52 pass, including a real Chatterbox run on the 4090.
+  - **Next (not done):** render the café project's lines with both engines into
+    `data/projects/6ddf7d40b344/compare/` and let the owner A/B them; then decide whether to set
+    `FRAMEFORGE_TTS_ENGINE=chatterbox` on this machine (still `kokoro`). Changing the voices means
+    re-running TTS, animate (S2V clips are keyed to the audio, ~30 min) and assemble.
 - Next: per-shot regeneration in the UI (redo one clip), optional frame interpolation 16→24 fps (frames
   are duplicated now), S2V for reaction shots (listener idle motion), and testing on the RTX 5080.
 

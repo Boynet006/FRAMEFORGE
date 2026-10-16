@@ -71,6 +71,23 @@ def run_fake(job: dict, out: Path) -> dict:
     return {"sample_rate": SR, "engine": "fake", "lines": lines}
 
 
+def _voiced_span(audio, sr: int, threshold_db: float = -42.0, keep_s: float = 0.04) -> tuple[int, int]:
+    """Sample range without leading/trailing near-silence (a few ms kept so consonants survive)."""
+    import numpy as np
+
+    frame = max(1, int(sr * 0.01))
+    n = len(audio) // frame
+    if n == 0:
+        return 0, len(audio)
+    rms = np.sqrt(np.mean(audio[: n * frame].reshape(n, frame) ** 2, axis=1) + 1e-12)
+    level = 20 * np.log10(rms / (np.max(rms) + 1e-12))
+    voiced = np.where(level > threshold_db)[0]
+    if voiced.size == 0:
+        return 0, len(audio)
+    keep = int(keep_s * sr)
+    return max(0, voiced[0] * frame - keep), min(len(audio), (voiced[-1] + 1) * frame + keep)
+
+
 def run_kokoro(job: dict, out: Path) -> dict:
     import numpy as np
     import soundfile as sf
@@ -97,6 +114,12 @@ def run_kokoro(job: dict, out: Path) -> dict:
                     words.append({"text": text, "start_s": round(offset + float(st), 3), "end_s": round(offset + float(et), 3)})
             offset += len(arr) / SR
         data = np.concatenate(chunks) if chunks else np.zeros(int(0.3 * SR), dtype=np.float32)
+        # trim edge silence so the timeline, not the model, decides the pauses (same as chatterbox_worker)
+        start, end = _voiced_span(data, SR)
+        data = data[start:end]
+        lead = start / SR
+        words = [{**w, "start_s": round(max(0.0, w["start_s"] - lead), 3), "end_s": round(max(0.0, w["end_s"] - lead), 3)}
+                 for w in words]
         f = out / f"{line['id']}.wav"
         f.parent.mkdir(parents=True, exist_ok=True)
         sf.write(str(f), data, SR)

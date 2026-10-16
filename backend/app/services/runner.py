@@ -305,7 +305,9 @@ class JobRunner:
 
         plan = self._load_plan(out.project_id)
         if stage == "tts":
-            engine = TTSEngine(self.settings.resolved_tts_python, self.settings.tts_engine, self.settings.tts_lang)
+            engine = TTSEngine(self.settings.resolved_tts_python, str(payload.get("engine") or self.settings.tts_engine),
+                               self.settings.tts_lang, chatterbox_python=self.settings.resolved_chatterbox_python,
+                               room_mix=self.settings.room_mix)
             return await engine.run(plan, project_dir, progress=progress)
         if stage == "refs":
             refs = RefsEngine(self._comfy_engine(), payload.get("workflow") or self.settings.image_workflow,

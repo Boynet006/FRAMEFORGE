@@ -87,12 +87,17 @@ def _queue_stage(session: Session, request: Request, project: Project, kind: str
 
 
 @router.post("/{project_id}/tts", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def generate_tts(project_id: str, request: Request, session: Session = Depends(get_session)) -> JobOut:
-    """Queue speech generation for every line of the plan (Phase 4)."""
+def generate_tts(project_id: str, request: Request, engine: str | None = None,
+                 session: Session = Depends(get_session)) -> JobOut:
+    """Queue speech generation for every line of the plan (Phase 4).
+
+    `engine` (kokoro | chatterbox) overrides FRAMEFORGE_TTS_ENGINE for this run."""
     project = _get_or_404(session, project_id)
     if project.plan is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "generate the plan first")
-    return _queue_stage(session, request, project, "tts.generate")
+    if engine not in (None, "kokoro", "chatterbox"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "engine must be kokoro or chatterbox")
+    return _queue_stage(session, request, project, "tts.generate", {"engine": engine} if engine else None)
 
 
 @router.post("/{project_id}/refs", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)

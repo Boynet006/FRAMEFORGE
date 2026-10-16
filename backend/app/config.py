@@ -43,9 +43,13 @@ class Settings(BaseSettings):
     image_workflow: str = "image_sd15_lcm"
 
     # Text-to-speech worker: separate interpreter (Python 3.12 venv with kokoro installed).
-    tts_engine: str = "kokoro"  # kokoro | fake
+    tts_engine: str = "kokoro"  # kokoro | chatterbox | fake
     tts_python: Path = Field(default=Path("./.venv-tts/Scripts/python.exe"))
     tts_lang: str = "a"  # Kokoro language code: a = American English, b = British English
+    # Expressive engine in its own venv (scripts/install-chatterbox.ps1)
+    chatterbox_python: Path = Field(default=Path("./.venv-chatterbox/Scripts/python.exe"))
+    # Scene room acoustics on the dialogue track (media_worker/room_worker.py)
+    room_mix: bool = True
 
     # Media workers (animator, music) share the TTS venv. FFmpeg from PATH unless overridden.
     ffmpeg: str = "ffmpeg"
@@ -101,6 +105,11 @@ class Settings(BaseSettings):
     @property
     def resolved_tts_python(self) -> str:
         p = self.tts_python
+        return str(p if p.is_absolute() else (BACKEND_DIR / p).resolve())
+
+    @property
+    def resolved_chatterbox_python(self) -> str:
+        p = self.chatterbox_python
         return str(p if p.is_absolute() else (BACKEND_DIR / p).resolve())
 
     @property

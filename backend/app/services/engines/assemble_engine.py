@@ -122,12 +122,20 @@ class AssembleEngine:
             has_music = True
 
         await progress(0.35, "encoding")
+        # Dialogue: gentle compression evens out loud and quiet lines. Music: ducked under speech by a
+        # sidechain keyed on the dialogue, so it can sit a little louder between lines. Whole mix: EBU R128
+        # loudness normalisation to -16 LUFS (streaming level) with a -1.5 dBTP ceiling.
+        dialogue = ("[1:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+                    "acompressor=threshold=-20dB:ratio=2.5:attack=8:release=150:makeup=2dB")
+        master = "loudnorm=I=-16:TP=-1.5:LRA=11,aformat=sample_rates=48000"
         if has_music:
-            afilter = (f"[1:a]aformat=sample_fmts=fltp:channel_layouts=stereo,volume=1.0[d];"
-                       f"[2:a]aformat=sample_fmts=fltp:channel_layouts=stereo,volume={plan.music.volume_db}dB[m];"
-                       f"[d][m]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[a]")
+            afilter = (f"{dialogue},asplit=2[d][key];"
+                       f"[2:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+                       f"volume={plan.music.volume_db + 4}dB[m];"
+                       f"[m][key]sidechaincompress=threshold=0.02:ratio=6:attack=40:release=500[md];"
+                       f"[d][md]amix=inputs=2:duration=first:dropout_transition=2:normalize=0,{master}[a]")
         else:
-            afilter = "[1:a]aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
+            afilter = f"{dialogue},{master}[a]"
         vfilters: list[str] = []
         if n_cues:
             # ffmpeg's subtitles filter needs forward slashes and escaped colons on Windows

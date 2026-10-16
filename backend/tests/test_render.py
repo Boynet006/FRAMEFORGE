@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import shutil
 import time
+import wave
 from pathlib import Path
 
 import pytest
@@ -79,6 +80,11 @@ def test_animate_and_assemble(client):
     pid = _ready_project(client)
     done = _wait(client, client.post(f"/api/projects/{pid}/tts").json()["id"], "succeeded", "failed")
     assert done["status"] == "succeeded"
+    assert done["result"]["room_mix"]["applied"] is True                 # worker venv present: room acoustics
+    root = app.state.runner.project_dir(pid)
+    with wave.open(str(root / "audio" / "dialogue.wav"), "rb") as w:
+        assert w.getnchannels() == 2 and w.getframerate() == 24000
+    assert client.post(f"/api/projects/{pid}/tts?engine=nope").status_code == 400
 
     job = client.post(f"/api/projects/{pid}/animate?max_seconds=2").json()
     done = _wait(client, job["id"], "succeeded", "failed")
