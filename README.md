@@ -60,6 +60,26 @@ prefixed `FRAMEFORGE_`. The important one for Phase 1 is `FRAMEFORGE_COMFYUI_URL
 Frontend settings live in `frontend/.env.local` (copy from `frontend/.env.local.example`):
 `NEXT_PUBLIC_API_URL` must point at the backend.
 
+## Source control
+
+The repository lives at `https://github.com/Boynet006/FRAMEFORGE`. Day-to-day workflow from the
+repository root:
+
+```powershell
+git status
+```
+
+```powershell
+git add -A; git commit -m "describe the change"
+```
+
+```powershell
+git push
+```
+
+Large generated files (models, renders, audio) are ignored by `.gitignore` on purpose; never
+force-add them. Secrets stay in `backend/.env` and `frontend/.env.local`, which are also ignored.
+
 ## Tests
 
 ```powershell
