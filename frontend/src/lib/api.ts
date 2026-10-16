@@ -116,6 +116,53 @@ export interface ProjectCreate {
   settings: Record<string, unknown>;
 }
 
+export interface WorkflowInput {
+  type: "string" | "integer" | "number" | "boolean";
+  default: unknown;
+  label: string;
+  min: number | null;
+  max: number | null;
+  step: number | null;
+}
+
+export interface Workflow {
+  name: string;
+  version: number;
+  key: string;
+  engine: string;
+  description: string;
+  output_kind: "image" | "video" | "audio";
+  validated: boolean;
+  requires: { models?: string[] };
+  inputs: Record<string, WorkflowInput>;
+  outputs: Array<{ node: string; kind: string }>;
+}
+
+export interface JobCreate {
+  workflow: string;
+  version?: number;
+  params: Record<string, unknown>;
+}
+
+export interface JobOutput {
+  filename: string;
+  kind: "image" | "video" | "audio" | "file";
+  node: string;
+  size: number;
+}
+
+export type JobEvent =
+  | { type: "hello" }
+  | { type: "ping" }
+  | { type: "job"; job: Job }
+  | { type: "project"; project: { id: string; status: ProjectStatus } };
+
+export const WS_URL = API_URL.replace(/^http/, "ws") + "/api/ws";
+
+export function outputUrl(jobId: string, filename: string): string {
+  return `${API_URL}/api/jobs/${jobId}/outputs/${encodeURIComponent(filename)}`;
+}
+
 // ---------- calls ----------
 
 export const api = {
@@ -134,4 +181,11 @@ export const api = {
     const qs = q.toString();
     return request<Job[]>(`/api/jobs${qs ? `?${qs}` : ""}`);
   },
+  listWorkflows: () => request<Workflow[]>("/api/workflows"),
+  createJob: (projectId: string, body: JobCreate) =>
+    request<Job>(`/api/projects/${projectId}/jobs`, { method: "POST", body: JSON.stringify(body) }),
+  cancelJob: (id: string) => request<Job>(`/api/jobs/${id}/cancel`, { method: "POST" }),
+  retryJob: (id: string) => request<Job>(`/api/jobs/${id}/retry`, { method: "POST" }),
+  deleteJob: (id: string) => request<void>(`/api/jobs/${id}`, { method: "DELETE" }),
+  comfyFree: () => request<void>("/api/comfy/free", { method: "POST" }),
 };

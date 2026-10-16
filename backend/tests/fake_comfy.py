@@ -177,6 +177,29 @@ class FakeComfy:
                 self.clients.discard(websocket)
 
 
+if __name__ == "__main__":  # manual UI testing:  python -m tests.fake_comfy --port 8188
+    import argparse
+    import tempfile
+
+    ap = argparse.ArgumentParser(description="Run the stand-in ComfyUI server (tests only)")
+    ap.add_argument("--port", type=int, default=8188)
+    ap.add_argument("--tick", type=float, default=0.5, help="seconds per progress step")
+    ap.add_argument("--steps", type=int, default=20, help="progress steps per job")
+    args = ap.parse_args()
+    out_dir = Path(tempfile.mkdtemp(prefix="fake-comfy-"))
+    fake = FakeComfy(out_dir, tick_s=args.tick)
+    _orig_run = fake._run
+
+    async def _slow_run(pid: str) -> None:  # default more steps so progress is visible in the UI
+        for node in fake.prompts[pid].values():
+            node.setdefault("inputs", {}).setdefault("__slow_steps__", args.steps)
+        await _orig_run(pid)
+
+    fake._run = _slow_run  # type: ignore[method-assign]
+    print(f"stand-in ComfyUI on http://127.0.0.1:{args.port}  outputs -> {out_dir}")
+    uvicorn.run(fake.app, host="127.0.0.1", port=args.port, log_level="warning")
+
+
 class FakeComfyServer:
     """Runs FakeComfy under uvicorn in a background thread."""
 

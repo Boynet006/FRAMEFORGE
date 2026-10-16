@@ -22,7 +22,8 @@ if (-not (Test-Path (Join-Path $backend '.env'))) {
 
 Push-Location $backend
 try {
-  & $python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+  # --reload-dir keeps the watcher off .venv and tests (pip installs otherwise trigger reloads)
+  & $python -m uvicorn app.main:app --reload --reload-dir app --reload-dir workflows --host 127.0.0.1 --port 8000
 } finally {
   Pop-Location
 }
