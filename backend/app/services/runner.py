@@ -25,6 +25,7 @@ from ..schemas import JobOut
 from .comfy_client import ComfyClient, ComfyError, ComfyUnavailable
 from .engines.comfy_engine import ComfyEngine, JobCancelled
 from .engines.plan_engine import PlanEngine
+from .engines.refs_engine import RefsEngine
 from .engines.tts_engine import TTSEngine, TTSError
 from .events import EventBus
 from .llm_client import LLMError, LLMUnavailable, OllamaClient
@@ -133,6 +134,21 @@ class JobRunner:
                 raise ValueError("project has no production plan yet; run the planner first")
             return ProductionPlan.model_validate(project.plan)
 
+    def _save_plan(self, project_id: str, plan: ProductionPlan) -> None:
+        with SessionLocal() as s:
+            project = s.get(Project, project_id)
+            if project is not None:
+                project.plan = plan.model_dump()
+                s.commit()
+
+    def _comfy_engine(self) -> ComfyEngine:
+        return ComfyEngine(
+            ComfyClient(self.comfy_url, self.settings.comfyui_timeout_s),
+            self.registry,
+            poll_s=self.settings.comfyui_poll_s,
+            timeout_s=self.settings.job_timeout_s,
+        )
+
     def delete_outputs(self, project_id: str, job_id: str) -> None:
         shutil.rmtree(self.output_dir(project_id, job_id), ignore_errors=True)
 
@@ -204,12 +220,7 @@ class JobRunner:
 
         try:
             if out.kind == "comfy.workflow":
-                engine = ComfyEngine(
-                    ComfyClient(self.comfy_url, self.settings.comfyui_timeout_s),
-                    self.registry,
-                    poll_s=self.settings.comfyui_poll_s,
-                    timeout_s=self.settings.job_timeout_s,
-                )
+                engine = self._comfy_engine()
                 result = await engine.run(
                     job_id,
                     out.payload,
@@ -230,6 +241,18 @@ class JobRunner:
                         s.commit()
                 result = {"summary": plan.summary()}
                 self.bus.publish({"type": "project", "project": {"id": out.project_id, "status": "draft", "has_plan": True}})
+            elif out.kind == "refs.generate":
+                plan = self._load_plan(out.project_id)
+                refs = RefsEngine(self._comfy_engine(), out.payload.get("workflow") or self.settings.image_workflow,
+                                  force=bool(out.payload.get("force")))
+
+                async def persist_plan(p: ProductionPlan) -> None:
+                    self._save_plan(out.project_id, p)
+
+                result = await refs.run(plan, self.project_dir(out.project_id), job_id, progress=progress,
+                                        persist_plan=persist_plan,
+                                        cancel_requested=lambda: job_id in self._cancel_requested)
+                self._save_plan(out.project_id, plan)
             elif out.kind == "tts.generate":
                 plan = self._load_plan(out.project_id)
                 engine = TTSEngine(self.settings.resolved_tts_python, self.settings.tts_engine, self.settings.tts_lang)
@@ -249,7 +272,7 @@ class JobRunner:
                 await asyncio.sleep(delay)
             else:
                 self._update(job_id, status=JobStatus.failed, error=str(exc), finished_at=_now())
-        except (ComfyError, LLMError, TTSError, WorkflowError, ValueError) as exc:
+        except (ComfyError, LLMError, TTSError, WorkflowError, ValueError, RuntimeError) as exc:
             self._update(job_id, status=JobStatus.failed, error=str(exc), finished_at=_now())
             log.error("job %s failed: %s", job_id, exc)
         finally:

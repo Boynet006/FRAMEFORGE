@@ -151,6 +151,34 @@ class PlanEngine:
                 scenes.append(Scene(id=f"s{i + 1}", environment_id=env_id, summary=str(beat.get("summary", "")),
                                     time_of_day=str(beat.get("time_of_day", "")), lines=lines))
 
+        # Small models routinely under-deliver on word budgets. Top up the last scene
+        # until the estimated runtime is close to the target.
+        for extra in range(4):
+            est = sum(s.estimated_duration_s for s in scenes)
+            if not scenes or est >= duration * 0.85:
+                break
+            missing_words = int((duration - est) * WORDS_PER_SECOND * 0.9)
+            if missing_words < 12:
+                break
+            await progress(0.88 + 0.02 * extra, f"extending dialogue ({int(est)}s of {duration}s)")
+            last = scenes[-1]
+            raw_lines = await self._scene_lines(prompt, outline, beats[-1], characters, missing_words,
+                                                continue_from=[(self._name(characters, l.character_id), l.text)
+                                                               for l in last.lines[-6:]])
+            start = len(last.lines)
+            added = 0
+            for j, rl in enumerate(raw_lines):
+                cid = char_by_name.get(str(rl.get("character", "")).lower()) or self._closest(rl.get("character", ""), char_by_name)
+                text = str(rl.get("text", "")).strip()
+                if not cid or not text:
+                    continue
+                last.lines.append(Line(id=f"{last.id}l{start + j + 1}", character_id=cid, text=text,
+                                       emotion=str(rl.get("emotion") or "neutral"), pause_after_s=0.35))
+                added += 1
+            if added == 0:
+                break
+            last.lines[-1].pause_after_s = 0.8
+
         try:
             plan = ProductionPlan(
                 title=outline["title"], logline=outline.get("logline", ""), style=style, aspect_ratio=aspect,
@@ -186,14 +214,20 @@ class PlanEngine:
         raise LLMError("model failed to produce a complete outline after 3 attempts")
 
     async def _scene_lines(self, prompt: str, outline: dict[str, Any], beat: dict[str, Any],
-                           characters: list[Character], budget: int) -> list[dict[str, Any]]:
+                           characters: list[Character], budget: int,
+                           continue_from: list[tuple[str, str]] | None = None) -> list[dict[str, Any]]:
         cast = "\n".join(f"- {c.name}: {c.personality}" for c in characters)
         names = ", ".join(c.name for c in characters)
+        task = "Write the dialogue for this scene.\n"
+        if continue_from:
+            prev = "\n".join(f"{n}: {t}" for n, t in continue_from)
+            task = (f"The scene so far:\n{prev}\n\nCONTINUE this scene with NEW lines that follow on naturally "
+                    f"(do not repeat earlier lines; escalate the argument or add a twist).\n")
         user = (
             f"Film: {outline['title']} — {outline.get('logline', '')}\n"
             f"Original request: {prompt}\n"
             f"Characters:\n{cast}\n\n"
-            f"Write the dialogue for this scene.\n"
+            f"{task}"
             f"Scene: {beat.get('summary', '')} (location: {beat.get('environment', '')}, {beat.get('time_of_day', '')})\n"
             f"Rules:\n"
             f"- About {budget} words in total across all lines (this matters: not much more, not much less).\n"
@@ -235,6 +269,10 @@ class PlanEngine:
                 voice=Voice(voice=voice),
             ))
         return out
+
+    @staticmethod
+    def _name(characters: list[Character], cid: str) -> str:
+        return next((c.name for c in characters if c.id == cid), cid)
 
     @staticmethod
     def _closest(name: str, by_name: dict[str, str]) -> str | None:

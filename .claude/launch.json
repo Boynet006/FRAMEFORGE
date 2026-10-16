@@ -8,6 +8,12 @@
       "port": 8000
     },
     {
+      "name": "comfyui-cpu",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": ["-ExecutionPolicy", "Bypass", "-File", "scripts/run-comfyui-cpu.ps1"],
+      "port": 8188
+    },
+    {
       "name": "frameforge-frontend",
       "runtimeExecutable": "powershell",
       "runtimeArgs": ["-ExecutionPolicy", "Bypass", "-File", "scripts/dev-frontend.ps1"],

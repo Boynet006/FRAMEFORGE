@@ -95,6 +95,16 @@ def generate_tts(project_id: str, request: Request, session: Session = Depends(g
     return _queue_stage(session, request, project, "tts.generate")
 
 
+@router.post("/{project_id}/refs", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def generate_refs(project_id: str, request: Request, force: bool = False,
+                  session: Session = Depends(get_session)) -> JobOut:
+    """Queue character + environment reference image generation via ComfyUI (Phase 5/6)."""
+    project = _get_or_404(session, project_id)
+    if project.plan is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "generate the plan first")
+    return _queue_stage(session, request, project, "refs.generate", {"force": force}, max_attempts=3)
+
+
 @router.get("/{project_id}/timeline")
 def get_timeline(project_id: str, request: Request, session: Session = Depends(get_session)) -> dict:
     """The timed dialogue manifest produced by the TTS stage."""

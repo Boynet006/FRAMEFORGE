@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen3:4b"
     ollama_timeout_s: float = 900.0
 
+    # Workflow template used for character/environment reference images.
+    # CPU machines: image_sd15_lcm. RTX 5080: a Qwen-Image/SDXL template once validated.
+    image_workflow: str = "image_sd15_lcm"
+
     # Text-to-speech worker: separate interpreter (Python 3.12 venv with kokoro installed).
     tts_engine: str = "kokoro"  # kokoro | fake
     tts_python: Path = Field(default=Path("./.venv-tts/Scripts/python.exe"))
