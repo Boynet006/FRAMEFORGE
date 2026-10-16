@@ -75,6 +75,12 @@ class ProjectUpdate(BaseModel):
     status: ProjectStatus | None = None
 
 
+class JobCreate(BaseModel):
+    workflow: str = Field(min_length=1, description="template name, e.g. image_basic_txt2img")
+    version: int | None = Field(default=None, description="template version; latest when omitted")
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
 class JobOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

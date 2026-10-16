@@ -6,8 +6,9 @@ so the client and job runner can be exercised without a GPU. It is never used
 by the application itself.
 
 Behaviour hooks for tests (via node inputs in the submitted graph):
-  "__fail__": true          -> execution_error after a few progress ticks
-  "__slow_steps__": N       -> N progress ticks (default 4)
+  "__fail__": true, or a "text" input containing "__fail__"
+                            -> execution_error after a few progress ticks
+  "__slow_steps__": N       -> N progress ticks (default 4); tick_s sets their duration
 """
 
 from __future__ import annotations
@@ -61,7 +62,10 @@ class FakeComfy:
         self.running = prompt_id
         self.interrupted = False
         await self._broadcast({"type": "execution_start", "data": {"prompt_id": prompt_id}})
-        fail = any(n.get("inputs", {}).get("__fail__") for n in graph.values())
+        fail = any(
+            n.get("inputs", {}).get("__fail__") or "__fail__" in str(n.get("inputs", {}).get("text", ""))
+            for n in graph.values()
+        )
         steps = next((int(n["inputs"]["__slow_steps__"]) for n in graph.values() if "__slow_steps__" in n.get("inputs", {})), 4)
         sampler = next((nid for nid, n in graph.items() if n.get("class_type") == "KSampler"), "3")
         await self._broadcast({"type": "executing", "data": {"node": sampler, "prompt_id": prompt_id}})

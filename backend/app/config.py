@@ -28,6 +28,10 @@ class Settings(BaseSettings):
 
     comfyui_url: str = "http://127.0.0.1:8188"
     comfyui_timeout_s: float = 3.0
+    comfyui_poll_s: float = 2.0
+    # Hard ceiling for one ComfyUI job (long video renders on a 16 GB card can take an hour).
+    job_timeout_s: float = 6 * 3600
+    job_max_attempts: int = 3
 
     ollama_url: str = "http://127.0.0.1:11434"
 

@@ -17,7 +17,10 @@ from . import __version__
 from .config import get_settings
 from .db import init_db
 from .logging_config import configure_logging
-from .routers import comfy, health, jobs, projects
+from .routers import comfy, health, jobs, projects, workflows, ws
+from .services.events import EventBus
+from .services.runner import JobRunner
+from .services.workflows import get_registry
 
 settings = get_settings()
 configure_logging(settings.log_level)
@@ -25,14 +28,20 @@ log = logging.getLogger("frameforge")
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(application: FastAPI):
     init_db()
+    application.state.bus = EventBus()
+    application.state.runner = JobRunner(settings, application.state.bus, get_registry())
+    await application.state.runner.start()
     log.info(
         "FRAMEFORGE backend %s started; data dir %s; ComfyUI %s",
         __version__, settings.resolved_data_dir, settings.comfyui_url,
     )
-    yield
-    log.info("FRAMEFORGE backend stopped")
+    try:
+        yield
+    finally:
+        await application.state.runner.stop()
+        log.info("FRAMEFORGE backend stopped")
 
 
 app = FastAPI(
@@ -54,6 +63,8 @@ app.include_router(health.router, prefix="/api")
 app.include_router(comfy.router, prefix="/api")
 app.include_router(projects.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
+app.include_router(workflows.router, prefix="/api")
+app.include_router(ws.router, prefix="/api")
 
 
 @app.exception_handler(Exception)

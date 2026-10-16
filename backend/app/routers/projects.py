@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db import get_session
 from ..models import Job, Project
-from ..schemas import JobOut, ProjectCreate, ProjectDetail, ProjectOut, ProjectUpdate
+from ..schemas import JobCreate, JobOut, ProjectCreate, ProjectDetail, ProjectOut, ProjectUpdate
+from ..services.workflows import WorkflowError, get_registry
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -65,7 +66,37 @@ def update_project(
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_project(project_id: str, session: Session = Depends(get_session)) -> None:
+def delete_project(project_id: str, request: Request, session: Session = Depends(get_session)) -> None:
     project = _get_or_404(session, project_id)
+    for job in project.jobs:
+        request.app.state.runner.delete_outputs(project_id, job.id)
     session.delete(project)
     session.commit()
+
+
+@router.post("/{project_id}/jobs", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def create_job(
+    project_id: str, body: JobCreate, request: Request, session: Session = Depends(get_session)
+) -> JobOut:
+    """Queue a ComfyUI workflow run for this project. Parameters are validated now, run later."""
+    _get_or_404(session, project_id)
+    try:
+        template = get_registry().get(body.workflow, body.version)
+        template.build(body.params)  # fail fast on bad params; the runner rebuilds with a fresh seed
+    except WorkflowError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    runner = request.app.state.runner
+    job = Job(
+        project_id=project_id,
+        kind="comfy.workflow",
+        payload={"workflow": template.name, "version": template.version, "params": body.params},
+        max_attempts=runner.settings.job_max_attempts,
+    )
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+    out = JobOut.model_validate(job)
+    runner._sync_project_status(session, project_id)
+    runner.bus.publish({"type": "job", "job": out.model_dump(mode="json")})
+    runner.wake()
+    return out
