@@ -63,6 +63,63 @@ def get_project(project_id: str, session: Session = Depends(get_session)) -> Pro
     return detail
 
 
+# ---------- pipeline stages ----------
+
+
+def _queue_stage(session: Session, request: Request, project: Project, kind: str,
+                 payload: dict | None = None, *, max_attempts: int = 2) -> JobOut:
+    active = session.scalars(
+        select(Job.id).where(Job.project_id == project.id, Job.kind == kind,
+                             Job.status.in_((JobStatus.queued, JobStatus.running))).limit(1)
+    ).first()
+    if active:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"{kind} already queued (job {active})")
+    runner = request.app.state.runner
+    job = Job(project_id=project.id, kind=kind, payload=payload or {}, max_attempts=max_attempts)
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+    out = JobOut.model_validate(job)
+    runner._sync_project_status(session, project.id)
+    runner.bus.publish({"type": "job", "job": out.model_dump(mode="json")})
+    runner.wake()
+    return out
+
+
+@router.post("/{project_id}/tts", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def generate_tts(project_id: str, request: Request, session: Session = Depends(get_session)) -> JobOut:
+    """Queue speech generation for every line of the plan (Phase 4)."""
+    project = _get_or_404(session, project_id)
+    if project.plan is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "generate the plan first")
+    return _queue_stage(session, request, project, "tts.generate")
+
+
+@router.get("/{project_id}/timeline")
+def get_timeline(project_id: str, request: Request, session: Session = Depends(get_session)) -> dict:
+    """The timed dialogue manifest produced by the TTS stage."""
+    _get_or_404(session, project_id)
+    path = request.app.state.runner.project_dir(project_id) / "audio" / "dialogue.json"
+    if not path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no dialogue timeline yet; run TTS first")
+    import json
+
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+@router.get("/{project_id}/files/{path:path}")
+def get_project_file(project_id: str, path: str, request: Request, session: Session = Depends(get_session)):
+    """Serve a generated file from the project's data folder (audio, images, renders)."""
+    from fastapi.responses import FileResponse
+
+    _get_or_404(session, project_id)
+    root = request.app.state.runner.project_dir(project_id).resolve()
+    target = (root / path).resolve()
+    if root not in target.parents or not target.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "file not found")
+    return FileResponse(target)
+
+
 # ---------- production plan (Phase 3) ----------
 
 

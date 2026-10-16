@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen3:4b"
     ollama_timeout_s: float = 900.0
 
+    # Text-to-speech worker: separate interpreter (Python 3.12 venv with kokoro installed).
+    tts_engine: str = "kokoro"  # kokoro | fake
+    tts_python: Path = Field(default=Path("./.venv-tts/Scripts/python.exe"))
+    tts_lang: str = "a"  # Kokoro language code: a = American English, b = British English
+
     database_url: str = "sqlite:///./data/frameforge.db"
     data_dir: Path = Field(default=Path("./data"))
 
@@ -54,6 +59,11 @@ class Settings(BaseSettings):
     @classmethod
     def _strip_slash(cls, v: str) -> str:
         return v.rstrip("/")
+
+    @property
+    def resolved_tts_python(self) -> str:
+        p = self.tts_python
+        return str(p if p.is_absolute() else (BACKEND_DIR / p).resolve())
 
     @property
     def resolved_data_dir(self) -> Path:

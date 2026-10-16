@@ -20,10 +20,12 @@ from sqlalchemy import select
 from ..config import Settings
 from ..db import SessionLocal
 from ..models import Job, JobStatus, Project, ProjectStatus
+from ..plan import ProductionPlan
 from ..schemas import JobOut
 from .comfy_client import ComfyClient, ComfyError, ComfyUnavailable
 from .engines.comfy_engine import ComfyEngine, JobCancelled
 from .engines.plan_engine import PlanEngine
+from .engines.tts_engine import TTSEngine, TTSError
 from .events import EventBus
 from .llm_client import LLMError, LLMUnavailable, OllamaClient
 from .workflows import WorkflowError, WorkflowRegistry
@@ -118,8 +120,18 @@ class JobRunner:
         self.wake()
         return out
 
+    def project_dir(self, project_id: str) -> Path:
+        return self.settings.resolved_data_dir / "projects" / project_id
+
     def output_dir(self, project_id: str, job_id: str) -> Path:
-        return self.settings.resolved_data_dir / "projects" / project_id / "jobs" / job_id
+        return self.project_dir(project_id) / "jobs" / job_id
+
+    def _load_plan(self, project_id: str) -> ProductionPlan:
+        with SessionLocal() as s:
+            project = s.get(Project, project_id)
+            if project is None or project.plan is None:
+                raise ValueError("project has no production plan yet; run the planner first")
+            return ProductionPlan.model_validate(project.plan)
 
     def delete_outputs(self, project_id: str, job_id: str) -> None:
         shutil.rmtree(self.output_dir(project_id, job_id), ignore_errors=True)
@@ -218,6 +230,10 @@ class JobRunner:
                         s.commit()
                 result = {"summary": plan.summary()}
                 self.bus.publish({"type": "project", "project": {"id": out.project_id, "status": "draft", "has_plan": True}})
+            elif out.kind == "tts.generate":
+                plan = self._load_plan(out.project_id)
+                engine = TTSEngine(self.settings.resolved_tts_python, self.settings.tts_engine, self.settings.tts_lang)
+                result = await engine.run(plan, self.project_dir(out.project_id), progress=progress)
             else:
                 raise ValueError(f"unknown job kind {out.kind}")
             self._update(job_id, status=JobStatus.succeeded, progress=1.0, result=result, finished_at=_now())
@@ -233,7 +249,7 @@ class JobRunner:
                 await asyncio.sleep(delay)
             else:
                 self._update(job_id, status=JobStatus.failed, error=str(exc), finished_at=_now())
-        except (ComfyError, LLMError, WorkflowError, ValueError) as exc:
+        except (ComfyError, LLMError, TTSError, WorkflowError, ValueError) as exc:
             self._update(job_id, status=JobStatus.failed, error=str(exc), finished_at=_now())
             log.error("job %s failed: %s", job_id, exc)
         finally:
