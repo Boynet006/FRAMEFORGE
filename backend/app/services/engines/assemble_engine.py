@@ -6,7 +6,6 @@ plus quality checks (durations, stream presence) recorded in the job result.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import shutil
@@ -16,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from ...plan import ProductionPlan
-from .animate_engine import run_worker
+from ..subproc import WorkerError, run_cmd, run_worker
 
 log = logging.getLogger(__name__)
 
@@ -66,12 +65,10 @@ def write_srt(plan: ProductionPlan, timeline: dict[str, Any], path: Path) -> int
 
 
 async def _run(cmd: list[str], what: str) -> str:
-    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    out, err = await proc.communicate()
-    if proc.returncode != 0:
-        tail = "\n".join(err.decode("utf-8", "replace").strip().splitlines()[-8:])
-        raise AssembleError(f"{what} failed (exit {proc.returncode}): {tail}")
-    return out.decode("utf-8", "replace")
+    try:
+        return await run_cmd(cmd, what)
+    except WorkerError as exc:
+        raise AssembleError(str(exc)) from exc
 
 
 async def probe(ffprobe: str, path: Path) -> dict[str, Any]:
@@ -115,9 +112,12 @@ class AssembleEngine:
         has_music = False
         if plan.music.enabled:
             await progress(0.15, "music")
-            await run_worker([self.python, str(MUSIC_WORKER), "--mood", plan.music.mood,
-                              "--duration", str(timeline["duration_s"] + 0.5), "--out", str(music_path)],
-                             MUSIC_WORKER.parent, progress, "music")
+            try:
+                await run_worker([self.python, str(MUSIC_WORKER), "--mood", plan.music.mood,
+                                  "--duration", str(timeline["duration_s"] + 0.5), "--out", str(music_path)],
+                                 MUSIC_WORKER.parent, progress, "music", lo=0.15, hi=0.3)
+            except WorkerError as exc:
+                raise AssembleError(str(exc)) from exc
             inputs += ["-i", str(music_path)]
             has_music = True
 

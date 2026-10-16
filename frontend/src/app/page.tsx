@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { GeneratePanel } from "@/components/GeneratePanel";
 import { JobsPanel } from "@/components/JobsPanel";
 import { NewProject, ProjectList } from "@/components/Projects";
+import { ProjectWorkspace } from "@/components/ProjectWorkspace";
 import { SystemStatus } from "@/components/SystemStatus";
 import { api, type Project } from "@/lib/api";
 import { useJobs } from "@/lib/useJobs";
@@ -52,9 +53,9 @@ export default function Home() {
           <h1 className="text-2xl font-bold tracking-tight">
             <span className="text-accent">FRAME</span>FORGE
           </h1>
-          <p className="text-sm text-muted">Local AI video studio · Phase 2 generation</p>
+          <p className="text-sm text-muted">Local AI video studio · one prompt to a finished MP4</p>
         </div>
-        <span className="rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted">v0.2.0</span>
+        <span className="rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted">v0.3.0</span>
       </header>
 
       <SystemStatus />
@@ -74,6 +75,8 @@ export default function Home() {
           error={projectsError}
         />
       </div>
+
+      {selected && <ProjectWorkspace project={selected} jobs={jobList} />}
 
       <div className="grid gap-4 lg:grid-cols-[1fr_1.3fr]">
         <GeneratePanel project={selected} onQueued={refreshJobs} />

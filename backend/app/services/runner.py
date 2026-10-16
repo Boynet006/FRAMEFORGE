@@ -264,9 +264,10 @@ class JobRunner:
             else:
                 self._update(job_id, status=JobStatus.failed, error=str(exc), finished_at=_now())
         except (ComfyError, LLMError, TTSError, AnimateError, AssembleError, WorkflowError, ValueError,
-                RuntimeError, FileNotFoundError) as exc:
-            self._update(job_id, status=JobStatus.failed, error=str(exc), finished_at=_now())
-            log.error("job %s failed: %s", job_id, exc)
+                RuntimeError, OSError) as exc:
+            msg = str(exc) or f"{type(exc).__name__} (no message)"
+            self._update(job_id, status=JobStatus.failed, error=msg, finished_at=_now())
+            log.error("job %s failed: %s", job_id, msg, exc_info=not str(exc))
         finally:
             self._cancel_requested.discard(job_id)
             self.current_job_id = None

@@ -85,9 +85,96 @@ export interface Project {
   prompt: string;
   settings: Record<string, unknown>;
   status: ProjectStatus;
+  has_plan: boolean;
   created_at: string;
   updated_at: string;
   job_count: number;
+}
+
+export interface PlanVoice {
+  engine: string;
+  voice: string;
+  speed: number;
+}
+export interface PlanCharacter {
+  id: string;
+  name: string;
+  role: string;
+  personality: string;
+  appearance: string;
+  image_prompt: string;
+  negative_prompt: string;
+  voice: PlanVoice;
+  reference_image: string | null;
+}
+export interface PlanEnvironment {
+  id: string;
+  name: string;
+  description: string;
+  image_prompt: string;
+  reference_image: string | null;
+}
+export interface PlanLine {
+  id: string;
+  character_id: string;
+  text: string;
+  emotion: string;
+  pause_after_s: number;
+}
+export interface PlanScene {
+  id: string;
+  environment_id: string;
+  summary: string;
+  time_of_day: string;
+  lines: PlanLine[];
+}
+export interface ProductionPlan {
+  version: number;
+  title: string;
+  logline: string;
+  style: string;
+  aspect_ratio: string;
+  target_duration_s: number;
+  characters: PlanCharacter[];
+  environments: PlanEnvironment[];
+  scenes: PlanScene[];
+  music: { enabled: boolean; mood: string; volume_db: number };
+  subtitles: boolean;
+}
+export interface PlanSummary {
+  title: string;
+  characters: number;
+  environments: number;
+  scenes: number;
+  lines: number;
+  words: number;
+  target_duration_s: number;
+  estimated_duration_s: number;
+}
+
+export interface FileInfo {
+  path: string;
+  size: number;
+  url: string;
+}
+export interface RenderInfo {
+  plan: boolean;
+  dialogue: FileInfo | null;
+  timeline: FileInfo | null;
+  music: FileInfo | null;
+  refs: FileInfo[];
+  video_silent: FileInfo | null;
+  subtitles: FileInfo | null;
+  final: FileInfo | null;
+}
+
+export interface LLMStatus {
+  reachable: boolean;
+  url: string;
+  model: string;
+  model_available: boolean | null;
+  models: string[];
+  error: string | null;
 }
 
 export interface Job {
@@ -163,6 +250,10 @@ export function outputUrl(jobId: string, filename: string): string {
   return `${API_URL}/api/jobs/${jobId}/outputs/${encodeURIComponent(filename)}`;
 }
 
+export function fileUrl(projectId: string, rel: string): string {
+  return `${API_URL}/api/projects/${projectId}/files/${rel}`;
+}
+
 // ---------- calls ----------
 
 export const api = {
@@ -181,6 +272,18 @@ export const api = {
     const qs = q.toString();
     return request<Job[]>(`/api/jobs${qs ? `?${qs}` : ""}`);
   },
+  llmStatus: () => request<LLMStatus>("/api/llm/status"),
+  getPlan: (id: string) => request<{ plan: ProductionPlan; summary: PlanSummary }>(`/api/projects/${id}/plan`),
+  putPlan: (id: string, plan: ProductionPlan) =>
+    request<{ plan: ProductionPlan; summary: PlanSummary }>(`/api/projects/${id}/plan`, {
+      method: "PUT",
+      body: JSON.stringify(plan),
+    }),
+  getRender: (id: string) => request<RenderInfo>(`/api/projects/${id}/render`),
+  runStage: (id: string, stage: "plan" | "tts" | "refs" | "animate" | "assemble", query = "") =>
+    request<Job>(`/api/projects/${id}/${stage}${query}`, { method: "POST" }),
+  generateFull: (id: string, force = false) =>
+    request<Job>(`/api/projects/${id}/generate${force ? "?force=true" : ""}`, { method: "POST" }),
   listWorkflows: () => request<Workflow[]>("/api/workflows"),
   createJob: (projectId: string, body: JobCreate) =>
     request<Job>(`/api/projects/${projectId}/jobs`, { method: "POST", body: JSON.stringify(body) }),

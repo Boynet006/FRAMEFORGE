@@ -80,7 +80,7 @@ export function GeneratePanel({
 
   return (
     <Card
-      title="Generate"
+      title="Single workflow run (advanced)"
       right={
         project ? (
           <span className="truncate text-xs text-muted">for “{project.title}”</span>

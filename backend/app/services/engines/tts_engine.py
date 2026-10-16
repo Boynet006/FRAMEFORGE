@@ -9,7 +9,6 @@ lines out on a timeline (scene gaps, per-line pauses) and writes:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import sys
@@ -19,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from ...plan import ProductionPlan
+from ..subproc import WorkerError, run_worker
 
 log = logging.getLogger(__name__)
 
@@ -61,21 +61,12 @@ class TTSEngine:
         cmd = [self.python, str(WORKER), "--job", str(job_path), "--out", str(audio_dir),
                "--result", str(result_path), "--engine", self.engine]
         log.info("tts: %s lines via %s (%s)", len(job["lines"]), self.engine, self.python)
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, cwd=str(WORKER.parent)
-        )
-        stderr_task = asyncio.create_task(proc.stderr.read())  # type: ignore[union-attr]
-        assert proc.stdout is not None
-        async for raw in proc.stdout:
-            line = raw.decode("utf-8", "replace").strip()
-            if line.startswith("PROGRESS "):
-                _, i, n = line.split()
-                await progress(0.05 + 0.85 * int(i) / max(int(n), 1), f"line {i}/{n}")
-        rc = await proc.wait()
-        stderr = (await stderr_task).decode("utf-8", "replace")
-        if rc != 0 or not result_path.exists():
-            tail = "\n".join(stderr.strip().splitlines()[-8:])
-            raise TTSError(f"tts worker failed (exit {rc}): {tail or 'no error output'}")
+        try:
+            await run_worker(cmd, WORKER.parent, progress, "line", lo=0.05, hi=0.9)
+        except WorkerError as exc:
+            raise TTSError(str(exc)) from exc
+        if not result_path.exists():
+            raise TTSError("tts worker exited without writing a result file")
 
         result = json.loads(result_path.read_text(encoding="utf-8"))
         by_id = {l["id"]: l for l in result["lines"]}

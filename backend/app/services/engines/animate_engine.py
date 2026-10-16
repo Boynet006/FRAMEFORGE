@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import sys
@@ -11,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ...plan import ProductionPlan
+from ..subproc import WorkerError, run_worker
 
 log = logging.getLogger(__name__)
 
@@ -25,31 +25,6 @@ PROFILES = {
 
 class AnimateError(RuntimeError):
     pass
-
-
-async def run_worker(cmd: list[str], cwd: Path, progress: ProgressCb, label: str) -> str:
-    """Run a worker subprocess, forward PROGRESS lines, return its last stdout line."""
-    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE,
-                                                stderr=asyncio.subprocess.PIPE, cwd=str(cwd))
-    stderr_task = asyncio.create_task(proc.stderr.read())  # type: ignore[union-attr]
-    assert proc.stdout is not None
-    last = ""
-    async for raw in proc.stdout:
-        line = raw.decode("utf-8", "replace").strip()
-        if line.startswith("PROGRESS "):
-            _, i, n = line.split()
-            await progress(min(int(i) / max(int(n), 1), 0.999), f"{label} {i}/{n}")
-        elif line:
-            last = line
-    rc = await proc.wait()
-    stderr = (await stderr_task).decode("utf-8", "replace")
-    for l in stderr.splitlines():
-        if l.startswith(("INFO", "WARN")):
-            log.info("worker: %s", l)
-    if rc != 0:
-        tail = "\n".join(stderr.strip().splitlines()[-10:])
-        raise AnimateError(f"{label} worker failed (exit {rc}): {tail or 'no error output'}")
-    return last
 
 
 class AnimateEngine:
@@ -68,7 +43,10 @@ class AnimateEngine:
                "--fps", str(prof["fps"]), "--ffmpeg", self.ffmpeg]
         if max_seconds:
             cmd += ["--max-seconds", str(max_seconds)]
-        last = await run_worker(cmd, WORKER.parent, progress, "frames")
+        try:
+            last = await run_worker(cmd, WORKER.parent, progress, "frame")
+        except WorkerError as exc:
+            raise AnimateError(str(exc)) from exc
         try:
             info = json.loads(last)
         except ValueError:

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { api, API_URL, POLL_MS, type ComfyStatus, type Health } from "@/lib/api";
+import { api, API_URL, POLL_MS, type ComfyStatus, type Health, type LLMStatus } from "@/lib/api";
 import { Card, KV } from "./Card";
 import { StatusDot } from "./StatusDot";
 
@@ -37,12 +37,14 @@ function fmtMb(bytes?: number) {
 export function SystemStatus() {
   const health = usePoll<Health>(api.health, POLL_MS);
   const comfy = usePoll<ComfyStatus>(api.comfyStatus, POLL_MS);
+  const llm = usePoll<LLMStatus>(api.llmStatus, POLL_MS * 2);
 
   const backendTone = health.error ? "bad" : health.data?.status === "ok" ? "ok" : health.data ? "warn" : "idle";
   const comfyTone = comfy.data?.reachable ? "ok" : comfy.data || comfy.error ? "bad" : "idle";
+  const llmTone = llm.data?.reachable ? (llm.data.model_available ? "ok" : "warn") : llm.data || llm.error ? "bad" : "idle";
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
+    <div className="grid gap-4 sm:grid-cols-3">
       <Card
         title="Backend"
         right={
@@ -114,6 +116,25 @@ export function SystemStatus() {
             {Math.round(POLL_MS / 1000)} s.
           </p>
         )}
+      </Card>
+
+      <Card
+        title="LLM (Ollama)"
+        right={
+          <span className="flex items-center gap-2 text-xs text-muted">
+            <StatusDot tone={llmTone} pulse={llmTone === "idle"} />
+            {llm.data ? (llm.data.reachable ? (llm.data.model_available ? "ready" : "model missing") : "unreachable") : llm.error ? "check failed" : "checking"}
+          </span>
+        }
+      >
+        <KV k="URL" v={llm.data?.url ?? "—"} mono />
+        <KV k="Model" v={llm.data?.model ?? "—"} mono />
+        {llm.data?.reachable && !llm.data.model_available && (
+          <p className="text-xs text-warn">
+            Pull it with <span className="font-mono">ollama pull {llm.data.model}</span>. Installed: {llm.data.models.join(", ") || "none"}
+          </p>
+        )}
+        {llm.data && !llm.data.reachable && <p className="text-sm text-bad break-words">{llm.data.error}</p>}
       </Card>
     </div>
   );
