@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frameforge-backend",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": ["-ExecutionPolicy", "Bypass", "-File", "scripts/dev-backend.ps1"],
+      "port": 8000
+    },
+    {
+      "name": "frameforge-frontend",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": ["-ExecutionPolicy", "Bypass", "-File", "scripts/dev-frontend.ps1"],
+      "port": 3000
+    }
+  ]
+}

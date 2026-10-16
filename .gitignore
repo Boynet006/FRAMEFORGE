@@ -1,0 +1,29 @@
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+backend/data/
+backend/.env
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
+frontend/*.tsbuildinfo
+frontend/next-env.d.ts
+
+# Generated media and model files never belong in git
+*.mp4
+*.wav
+*.mp3
+*.safetensors
+*.gguf
+*.ckpt
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/

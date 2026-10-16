@@ -1,0 +1,12 @@
+# Normalize line endings: LF in the repository, native on checkout is NOT wanted
+# because the PowerShell scripts and Python both run fine with LF on Windows.
+* text=auto eol=lf
+*.ps1 text eol=lf
+*.bat text eol=crlf
+
+# Binary / generated
+*.png binary
+*.jpg binary
+*.ico binary
+*.mp4 binary
+*.wav binary
