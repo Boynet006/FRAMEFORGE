@@ -1,12 +1,24 @@
 # FRAMEFORGE — Project Status
 
-Last updated: 2026-10-16 (Phase 2 built)
+Last updated: 2026-10-16 (CPU-mode pipeline built end to end)
 
 ## Current phase
 
-**Phase 0 — Environment and feasibility** is still open (waiting for the 5080 PC probe, the
-commercial-use answer and the visual-style answer). **Phases 1 and 2** were built on the dev
-machine because they need no GPU; Phase 2 awaits validation against a real ComfyUI.
+The owner decided to develop on the GPU-less HP all-in-one and demo there, so a **CPU mode** was
+built that runs every stage with real local AI where feasible (Ollama script, Kokoro voices,
+ComfyUI-CPU reference images) and a procedural animator where video diffusion and audio-driven
+lip-sync models cannot run (Intel iGPU, 15 GB RAM). The GPU path for the RTX 5080 PC keeps the same
+plan/timeline/shot data and is designed but not built (Phase 0 still open there: probe, licensing
+and style answers pending).
+
+| Stage | CPU-mode engine (this machine) | Status |
+|---|---|---|
+| Script | Ollama `qwen3:4b`, two-pass + length top-up | Working, tested live (48 s for a 60 s script) |
+| Voices | Kokoro-82M in `backend/.venv-tts` | Working, tested live (~1x real-time, word timestamps) |
+| References | ComfyUI 0.41 `--cpu`, SD 1.5 + LCM LoRA | Working, tested live (~70–100 s per image) |
+| Animate | `media_worker/animate_worker.py` | Working in tests; first full live render in progress |
+| Assemble | FFmpeg 9 + procedural music + SRT | Working in tests |
+| One-click pipeline | `pipeline.full` job with checkpoint reuse | Working in tests; live run in progress |
 
 ## Summary
 
@@ -15,13 +27,13 @@ machine because they need no GPU; Phase 2 awaits validation against a real Comfy
 | 0 Environment & feasibility | In progress | Session machine probed: HP all-in-one, Intel iGPU, 15 GB RAM, **no NVIDIA GPU**. RTX 5080 machine not yet probed. Candidate model stack drafted. See [PHASE0_ENVIRONMENT_REPORT.md](PHASE0_ENVIRONMENT_REPORT.md). |
 | 1 Project foundation | **Done (on the AIO dev machine), 2026-10-16** | FastAPI backend with `/api/health`, `/api/comfy/status`, project + job persistence (SQLite); Next.js 16 + Tailwind 4 dark dashboard; dev scripts; git repo. Tested: 5 backend tests pass, dashboard verified in browser, project created end to end. ComfyUI check truthfully reports "unreachable" here. Remaining: re-run on the 5080 PC with ComfyUI up. |
 | 2 UI + ComfyUI integration | **Built and tested against a stand-in ComfyUI, 2026-10-16.** Real-engine validation pending. | Full ComfyUI API client (HTTP + WebSocket), versioned workflow templates, background job runner with cancel/retry/resume, jobs API, WebSocket events, generation UI with live progress and previews. 26 backend tests pass; UI verified in the browser against the stand-in. **Not yet run against a real ComfyUI**; the two templates are marked `validated: false`. |
-| 3 Script & production planning | Not started | |
-| 4 Dialogue & voices | Not started | |
-| 5 Character animation & lip sync | Not started | Highest technical risk: audio-driven animation of non-human characters at 16 GB. |
-| 6 Automated scene generation | Not started | |
-| 7 Editing & final render | Not started | |
-| 8 Full 10-minute production | Not started | Expect 6-14 h final renders; checkpointing is mandatory. |
-| 9 Reliability & usability | Not started | |
+| 3 Script & production planning | **Done (CPU and GPU share it)** | `ProductionPlan` schema, Ollama JSON-schema planner, outline + per-scene passes, length top-up, editable in advanced mode. Tested with stand-in and live `qwen3:4b`. |
+| 4 Dialogue & voices | **Done** | Kokoro worker (own venv), per-line WAV + word timestamps, timeline with pauses/scene gaps, mixed dialogue track. Tested live. |
+| 5 Character animation & lip sync | **CPU mode done; GPU mode not built** | CPU: rembg cutouts, OpenCV cat/human face boxes, audio-envelope jaw/mouth, blinks, head motion, listener reactions. GPU (Wan 2.2 S2V / InfiniteTalk) pending the 5080 PC. |
+| 6 Automated scene generation | **CPU mode done; GPU mode not built** | Shot planner (establishing, shot/reverse-shot, reaction cut-ins, two-shots) from the timeline; references via ComfyUI; checkpointed. GPU shot rendering pending. |
+| 7 Editing & final render | **Done** | FFmpeg assembly: subtitles (SRT burn-in), procedural music mix, libx264/aac, ffprobe QC (duration/streams). In-app preview + download. |
+| 8 Full 10-minute production | Partly | Pipeline is checkpointed and resumable; planner scales scenes by duration. Not yet exercised beyond ~1 minute; no ETA/VRAM telemetry yet. |
+| 9 Reliability & usability | Partly | Project workspace UI, stage controls, plan editor, truthful errors, retry/cancel. Missing: project history/reusable characters, per-shot regeneration, docs for GPU setup validation. |
 
 ## Architecture decisions (so far)
 
@@ -60,6 +72,19 @@ Outstanding:
 - No background job runner or WebSocket yet (Phase 2).
 - Verified only with ComfyUI absent; the "connected" branch of the ComfyUI card is untested
   until ComfyUI runs.
+
+## CPU-mode build notes (2026-10-16)
+
+- Installed on the dev machine: Python 3.12, Ollama 0.40 + `qwen3:4b`, FFmpeg 9 full, ComfyUI 0.41
+  (`C:\AI\ComfyUI`, torch 2.14 CPU, SD 1.5 fp16 + LCM LoRA), worker venv `backend/.venv-tts`
+  (torch CPU, kokoro, Pillow, OpenCV, rembg). Reproducible via `scripts/install-workers.ps1` and
+  `scripts/install-comfyui-cpu.ps1`.
+- Real bug found live: on Windows, uvicorn's selector event loop cannot spawn asyncio subprocesses
+  (bare `NotImplementedError`, which also produced empty job errors). Workers now run through
+  `app/services/subproc.py` in threads; the runner never stores an empty error.
+- Timeline layout gives every scene an establishing gap (1.5 s lead-in, 1.0 s between scenes) so
+  the shot planner always has a wide shot.
+- Tests: 38 backend tests; render tests use the real worker venv and FFmpeg (skipped if absent).
 
 ## Phase 2 summary
 

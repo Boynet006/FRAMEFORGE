@@ -74,17 +74,49 @@ export function ProjectWorkspace({ project, jobs }: { project: Project; jobs: Jo
     }
   };
 
-  const latestOfKind = (kind: string) => projectJobs.find((j) => j.kind === kind) ?? null;
-  const stageTone = (key: StageKey): Tone => {
+  // Pipeline progress ranges mirror backend pipeline_engine.STAGES.
+  const PIPELINE_RANGES: Record<StageKey, [number, number]> = {
+    plan: [0, 0.12], tts: [0.12, 0.3], refs: [0.3, 0.55], animate: [0.55, 0.85], assemble: [0.85, 1],
+  };
+  const pipelineActive = pipelineJob && (pipelineJob.status === "running" || pipelineJob.status === "queued");
+  const pipelineStage: StageKey | null = pipelineActive
+    ? (Object.entries(PIPELINE_RANGES).find(([, [lo, hi]]) => pipelineJob.progress >= lo && pipelineJob.progress < hi)?.[0] as StageKey) ?? "assemble"
+    : null;
+
+  // Only consider standalone stage jobs newer than the latest pipeline run.
+  const latestOfKind = (kind: string) => {
+    const j = projectJobs.find((x) => x.kind === kind) ?? null;
+    if (j && pipelineJob && j.created_at < pipelineJob.created_at) return null;
+    return j;
+  };
+  const stageJob = (key: StageKey): { running: boolean; failed: string | null; progress: number } => {
     const j = latestOfKind(STAGES.find((s) => s.key === key)!.kind);
+    if (pipelineStage === key && pipelineJob) {
+      const [lo, hi] = PIPELINE_RANGES[key];
+      return { running: true, failed: null, progress: (pipelineJob.progress - lo) / (hi - lo) };
+    }
+    if (pipelineJob?.status === "failed" && pipelineJob.error && !j) {
+      // the pipeline failed inside some stage; the error text names it ("tts worker ...", "frame worker ...")
+      const hint = pipelineJob.error.toLowerCase();
+      const mine = key === "tts" ? hint.includes("tts") : key === "animate" ? hint.includes("frame") : key === "assemble" ? hint.includes("ffmpeg") || hint.includes("music") : key === "refs" ? hint.includes("comfy") || hint.includes("image") : hint.includes("ollama") || hint.includes("plan");
+      return { running: false, failed: mine ? pipelineJob.error : null, progress: 0 };
+    }
+    return {
+      running: Boolean(j && (j.status === "running" || j.status === "queued")),
+      failed: j?.status === "failed" ? j.error : null,
+      progress: j?.progress ?? 0,
+    };
+  };
+  const stageTone = (key: StageKey): Tone => {
+    const s = stageJob(key);
     const done =
       key === "plan" ? project.has_plan
       : key === "tts" ? Boolean(render?.dialogue)
       : key === "refs" ? (render?.refs.length ?? 0) > 0
       : key === "animate" ? Boolean(render?.video_silent)
       : Boolean(render?.final);
-    if (j && (j.status === "running" || j.status === "queued")) return "warn";
-    if (j && j.status === "failed") return "bad";
+    if (s.running) return "warn";
+    if (s.failed) return "bad";
     return done ? "ok" : "idle";
   };
 
@@ -141,21 +173,20 @@ export function ProjectWorkspace({ project, jobs }: { project: Project; jobs: Jo
 
         <ol className="grid gap-2 sm:grid-cols-5">
           {STAGES.map((s) => {
-            const j = latestOfKind(s.kind);
-            const running = j && (j.status === "running" || j.status === "queued");
+            const st = stageJob(s.key);
             return (
               <li key={s.key} className="flex flex-col gap-1 rounded-md border border-border bg-surface-2/40 p-2">
                 <div className="flex items-center gap-2 text-sm font-medium">
-                  <StatusDot tone={stageTone(s.key)} pulse={Boolean(running)} />
+                  <StatusDot tone={stageTone(s.key)} pulse={st.running} />
                   {s.label}
                 </div>
                 <p className="text-[11px] leading-snug text-muted">{s.help}</p>
-                {running && (
+                {st.running && (
                   <div className="h-1 w-full overflow-hidden rounded bg-surface">
-                    <div className="h-full bg-accent" style={{ width: `${Math.round(j!.progress * 100)}%` }} />
+                    <div className="h-full bg-accent transition-[width] duration-500" style={{ width: `${Math.round(Math.min(1, Math.max(0, st.progress)) * 100)}%` }} />
                   </div>
                 )}
-                {j?.status === "failed" && <p className="text-[11px] text-bad line-clamp-3">{j.error}</p>}
+                {st.failed && <p className="text-[11px] text-bad line-clamp-3">{st.failed}</p>}
                 {advanced && (
                   <button
                     onClick={() => void run(() => api.runStage(project.id, s.key))}

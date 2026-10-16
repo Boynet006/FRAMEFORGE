@@ -14,19 +14,57 @@ scripts/    Windows PowerShell helpers (environment probe, dev servers)
 docs/       Status, environment report, install plan
 ```
 
+## Continue on another computer
+
+Everything needed is in the repository (code, docs, `CLAUDE.md` with the project context for
+Claude Code). Generated media and model files are not; they are rebuilt locally.
+
+```powershell
+git clone https://github.com/Boynet006/FRAMEFORGE.git
+```
+
+Then follow the prerequisites and the engine setup below, open Claude Code in the folder, and it
+will read `CLAUDE.md` and `docs/PROJECT_STATUS.md` for where things stand. Commit and push after
+each step so the next machine stays current.
+
 ## Prerequisites (Windows)
 
-- Python 3.12 or newer (`py -3 --version`)
+- Python 3.12 (`py -3.12 --version`) — used for the backend and the AI workers
 - Node.js LTS 20+ and npm (`node --version`)
-- Git
-- Optional for Phase 1, required later: ComfyUI running on `http://127.0.0.1:8188`
+- Git, FFmpeg 7+ on PATH (`ffmpeg -version`)
+- Ollama with the planning model (`ollama pull qwen3:4b` on CPU machines, `qwen3:14b` on the RTX 5080 PC)
+- ComfyUI on `http://127.0.0.1:8188`
 
-Install the first three with winget:
+Install with winget:
 
 ```powershell
 winget install --id Python.Python.3.12 -e
 winget install --id OpenJS.NodeJS.LTS -e
 winget install --id Git.Git -e
+winget install --id Gyan.FFmpeg -e
+winget install --id Ollama.Ollama -e
+```
+
+Then, from the repository root (new terminal so PATH is fresh):
+
+```powershell
+ollama pull qwen3:4b
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install-workers.ps1
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install-comfyui-cpu.ps1
+```
+
+The last script installs ComfyUI in CPU mode with Stable Diffusion 1.5 + LCM (about 2.3 GB of
+models) into `C:\AI\ComfyUI`. On the RTX 5080 PC use the GPU sequence in
+`docs/PHASE0_INSTALL_PLAN.md` instead. Start ComfyUI with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run-comfyui-cpu.ps1
 ```
 
 ## Run the development servers
@@ -97,6 +135,13 @@ cd backend; .\.venv\Scripts\python.exe -m pytest
 | GET/POST | `/api/projects` | List / create projects |
 | GET/PATCH/DELETE | `/api/projects/{id}` | Read (with jobs) / update / delete a project |
 | POST | `/api/projects/{id}/jobs` | Queue a workflow run `{workflow, version?, params}` |
+| GET | `/api/llm/status` | Ollama reachability and whether the configured model is pulled |
+| POST | `/api/projects/{id}/generate[?force=true]` | **One click:** plan → voices → references → animate → assemble |
+| POST | `/api/projects/{id}/plan` `/tts` `/refs` `/animate` `/assemble` | Run a single stage |
+| GET/PUT | `/api/projects/{id}/plan` | Read / edit the production plan (advanced mode) |
+| GET | `/api/projects/{id}/timeline` | Timed dialogue manifest with word timestamps |
+| GET | `/api/projects/{id}/render` | What exists on disk: refs, audio, picture track, final video |
+| GET | `/api/projects/{id}/files/{path}` | Serve a generated file |
 | GET | `/api/jobs` | List jobs, filter by `project_id` and `status` |
 | GET | `/api/jobs/{id}` | Read one job |
 | POST | `/api/jobs/{id}/cancel` | Cancel a queued job or interrupt a running one |
@@ -120,6 +165,22 @@ To try the UI without a GPU, run the stand-in ComfyUI from `backend/`:
 
 It mimics the real API shapes and produces placeholder files. It is for development only.
 
+## How a video is made (CPU mode)
+
+1. **Script** — Ollama writes an outline, then dialogue per scene, constrained by JSON schemas, and
+   tops up short scripts until the estimated runtime is near the target.
+2. **Voices** — Kokoro speaks every line (distinct voice per character) and produces a timeline with
+   word timestamps, pauses and scene gaps, plus a mixed dialogue track.
+3. **References** — ComfyUI renders one portrait per character and one wide image per environment.
+4. **Animate** — the animator cuts characters out (rembg), finds faces (OpenCV), plans shots
+   (establishing, shot/reverse-shot, reaction cut-ins, two-shots) and renders frames with
+   audio-driven mouth movement, blinks, head motion and camera moves.
+5. **Assemble** — FFmpeg burns subtitles, mixes procedural music under the dialogue and writes
+   `render/final.mp4`; ffprobe checks duration and streams.
+
+Every stage leaves its outputs on disk under `backend/data/projects/<id>/`, so a re-run resumes
+where it stopped. On the RTX 5080 PC stage 4 is meant to use ComfyUI video models instead.
+
 ## Troubleshooting
 
 - **`py` not found**: install Python from python.org or winget; make sure "py launcher" is selected.
@@ -130,3 +191,10 @@ It mimics the real API shapes and produces placeholder files. It is for developm
 - **ComfyUI card red**: expected until ComfyUI is installed and running on the configured URL.
   Start ComfyUI, then the card refreshes on its own.
 - **Port already in use**: change `FRAMEFORGE_PORT` / `--port` and update `NEXT_PUBLIC_API_URL`.
+- **Voices stage fails with "cannot start line worker"**: `backend/.venv-tts` is missing; run
+  `scripts\install-workers.ps1`.
+- **Script stage fails with "model not found"**: `ollama pull <model>` for the model named in
+  `FRAMEFORGE_OLLAMA_MODEL`.
+- **References stage fails with "ComfyUI rejected the graph"**: the checkpoint or LoRA file named in
+  the template is missing from ComfyUI's `models/` folders.
+- **Assemble fails mentioning `subtitles`**: your FFmpeg build lacks libass; install the "full" build.
