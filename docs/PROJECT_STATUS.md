@@ -1,6 +1,6 @@
 # FRAMEFORGE — Project Status
 
-Last updated: 2026-10-16 (CPU-mode pipeline built end to end)
+Last updated: 2026-10-16 (pipeline running live on an RTX 4090 laptop with CUDA ComfyUI)
 
 ## Current phase
 
@@ -77,11 +77,22 @@ Outstanding:
 
 - Hardware: NVIDIA GeForce RTX 4090 Laptop GPU (16 GB VRAM, driver 595.79), Intel UHD iGPU, 64 GB RAM.
   Same VRAM budget as the RTX 5080 target, so the GPU path and Phase 0 tests can be exercised here.
-- Present: Python 3.12.3, FFmpeg 8.0.1 (winget Gyan.FFmpeg). Installed this session: Node.js 24.20 LTS.
-- Missing: Git, Ollama, ComfyUI, `backend/.venv-tts`. The folder came from a ZIP, not a clone, so there
-  is no git history and no earlier project renders (`backend/data` is gitignored).
-- Verified: backend and frontend start; dashboard loads with no console errors; health card detects the
-  4090. ComfyUI and Ollama cards report unreachable, as expected.
+- Installed this session: Node.js 24.20 LTS, Git 2.55, Ollama 0.40.5 (`qwen3:14b` + `qwen3:8b`),
+  ComfyUI 0.41 at `C:\AI\ComfyUI` with torch 2.14.1+cu130 (`scripts/install-comfyui-gpu.ps1`; the cu128
+  index stops at torch 2.11), worker venv `backend/.venv-tts` (CPU torch). Python 3.12.3 and FFmpeg 8.0.1
+  were already present. The folder came from a ZIP; it was linked to `origin/main` (identical tree).
+- `backend/.env` here: `FRAMEFORGE_OLLAMA_MODEL=qwen3:14b`. Everything else matches the CPU defaults
+  (`render_mode=cpu`: the procedural animator still renders the shots).
+- Tests: 38/38 pass, none skipped. Fixed a test leak: `conftest.py` now pins the Ollama model, because a
+  GPU machine's `.env` (`qwen3:14b`) made the stand-in planner test fail.
+- **First live run on this machine:** one-click pipeline, 60 s "two cats" prompt, succeeded in 6 min 45 s
+  end to end. Script `qwen3:14b` (19 lines, 143 words), Kokoro voices (69.4 s), 3 reference images on
+  the 4090 via `image_sd15_lcm` (11 s first image incl. model load, then ~1 s each vs 70–100 s on CPU),
+  22 shots / 1665 frames at 960x540, final.mp4 with 19 subtitle cues; all QC checks passed.
+  Spot-checked 4 frames: subtitles readable, speaker's mouth opens, wide/close-up cuts work.
+  Seen problem: the second "cat" came out puppy-like (SD 1.5 prompt adherence). Audio not reviewed.
+- Next on this machine: a better image template (SDXL or Qwen-Image) now that VRAM allows it, then the
+  GPU animate path (Wan 2.2 S2V, Phase 0 tests T1–T7), which this laptop can run as a 5080 stand-in.
 
 ## Handoff — where to pick up on the next machine
 
