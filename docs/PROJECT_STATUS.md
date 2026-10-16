@@ -73,6 +73,16 @@ Outstanding:
 - Verified only with ComfyUI absent; the "connected" branch of the ComfyUI card is untested
   until ComfyUI runs.
 
+## Session machine 2026-10-16 (later): MSI laptop with RTX 4090 Laptop GPU
+
+- Hardware: NVIDIA GeForce RTX 4090 Laptop GPU (16 GB VRAM, driver 595.79), Intel UHD iGPU, 64 GB RAM.
+  Same VRAM budget as the RTX 5080 target, so the GPU path and Phase 0 tests can be exercised here.
+- Present: Python 3.12.3, FFmpeg 8.0.1 (winget Gyan.FFmpeg). Installed this session: Node.js 24.20 LTS.
+- Missing: Git, Ollama, ComfyUI, `backend/.venv-tts`. The folder came from a ZIP, not a clone, so there
+  is no git history and no earlier project renders (`backend/data` is gitignored).
+- Verified: backend and frontend start; dashboard loads with no console errors; health card detects the
+  4090. ComfyUI and Ollama cards report unreachable, as expected.
+
 ## Handoff — where to pick up on the next machine
 
 Clone the repo, follow README "Continue on another computer", start the three servers, then:

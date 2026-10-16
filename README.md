@@ -60,12 +60,25 @@ powershell -ExecutionPolicy Bypass -File scripts\install-comfyui-cpu.ps1
 ```
 
 The last script installs ComfyUI in CPU mode with Stable Diffusion 1.5 + LCM (about 2.3 GB of
-models) into `C:\AI\ComfyUI`. On the RTX 5080 PC use the GPU sequence in
-`docs/PHASE0_INSTALL_PLAN.md` instead. Start ComfyUI with:
+models) into `C:\AI\ComfyUI`. Start ComfyUI with:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\run-comfyui-cpu.ps1
 ```
+
+**NVIDIA GPU machines** (RTX 4090 laptop, RTX 5080): pull `qwen3:14b` instead of `qwen3:4b`, set
+`FRAMEFORGE_OLLAMA_MODEL=qwen3:14b` in `backend\.env`, and install ComfyUI with CUDA PyTorch
+(same models and templates as the CPU install):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install-comfyui-gpu.ps1
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run-comfyui-gpu.ps1
+```
+
+The video-model GPU sequence (Wan 2.2) is in `docs/PHASE0_INSTALL_PLAN.md`.
 
 ## Run the development servers
 

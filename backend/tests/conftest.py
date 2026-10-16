@@ -18,6 +18,8 @@ os.environ["FRAMEFORGE_COMFYUI_URL"] = "http://127.0.0.1:1"  # overridden per te
 os.environ["FRAMEFORGE_COMFYUI_TIMEOUT_S"] = "1"
 os.environ["FRAMEFORGE_OLLAMA_URL"] = "http://127.0.0.1:1"
 os.environ["FRAMEFORGE_OLLAMA_TIMEOUT_S"] = "5"
+# The stand-in serves qwen3:4b; pin it so a GPU machine's backend/.env (qwen3:14b) doesn't leak in.
+os.environ["FRAMEFORGE_OLLAMA_MODEL"] = "qwen3:4b"
 os.environ["FRAMEFORGE_CORS_ORIGINS"] = "http://localhost:3000, http://127.0.0.1:3000"
 os.environ["FRAMEFORGE_LOG_LEVEL"] = "WARNING"
 

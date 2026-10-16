@@ -14,6 +14,12 @@
       "port": 8188
     },
     {
+      "name": "comfyui-gpu",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": ["-ExecutionPolicy", "Bypass", "-File", "scripts/run-comfyui-gpu.ps1"],
+      "port": 8188
+    },
+    {
       "name": "frameforge-frontend",
       "runtimeExecutable": "powershell",
       "runtimeArgs": ["-ExecutionPolicy", "Bypass", "-File", "scripts/dev-frontend.ps1"],
