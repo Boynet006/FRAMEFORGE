@@ -1,5 +1,6 @@
 # Python
 backend/.venv/
+backend/.venv-tts/
 __pycache__/
 *.pyc
 .pytest_cache/

@@ -17,7 +17,7 @@ from . import __version__
 from .config import get_settings
 from .db import init_db
 from .logging_config import configure_logging
-from .routers import comfy, health, jobs, projects, workflows, ws
+from .routers import comfy, health, jobs, llm, projects, workflows, ws
 from .services.events import EventBus
 from .services.runner import JobRunner
 from .services.workflows import get_registry
@@ -64,6 +64,7 @@ app.include_router(comfy.router, prefix="/api")
 app.include_router(projects.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
 app.include_router(workflows.router, prefix="/api")
+app.include_router(llm.router, prefix="/api")
 app.include_router(ws.router, prefix="/api")
 
 

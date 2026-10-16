@@ -41,6 +41,25 @@ def init_db() -> None:
     from . import models  # noqa: F401  (register tables)
 
     Base.metadata.create_all(engine)
+    _migrate()
+
+
+def _migrate() -> None:
+    """Add columns introduced after a table was first created (SQLite has no ALTER ... IF NOT EXISTS)."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    wanted = {
+        "projects": {"plan": "JSON"},
+    }
+    with engine.begin() as conn:
+        for table, cols in wanted.items():
+            if table not in insp.get_table_names():
+                continue
+            existing = {c["name"] for c in insp.get_columns(table)}
+            for col, ddl in cols.items():
+                if col not in existing:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))
 
 
 def get_session() -> Generator[Session, None, None]:

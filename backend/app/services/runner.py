@@ -23,7 +23,9 @@ from ..models import Job, JobStatus, Project, ProjectStatus
 from ..schemas import JobOut
 from .comfy_client import ComfyClient, ComfyError, ComfyUnavailable
 from .engines.comfy_engine import ComfyEngine, JobCancelled
+from .engines.plan_engine import PlanEngine
 from .events import EventBus
+from .llm_client import LLMError, LLMUnavailable, OllamaClient
 from .workflows import WorkflowError, WorkflowRegistry
 
 log = logging.getLogger(__name__)
@@ -41,6 +43,7 @@ class JobRunner:
         self.bus = bus
         self.registry = registry
         self.comfy_url = settings.comfyui_url  # mutable so tests can point at a stand-in
+        self.ollama_url = settings.ollama_url
         self._wake = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._stopping = False
@@ -203,6 +206,18 @@ class JobRunner:
                     persist_payload=persist_payload,
                     cancel_requested=lambda: job_id in self._cancel_requested,
                 )
+            elif out.kind == "plan.generate":
+                llm = OllamaClient(self.ollama_url, self.settings.ollama_model, self.settings.ollama_timeout_s)
+                plan = await PlanEngine(llm).run(out.payload.get("settings") or {}, out.payload["prompt"], progress=progress)
+                await llm.unload()
+                with SessionLocal() as s:
+                    project = s.get(Project, out.project_id)
+                    if project is not None:
+                        project.plan = plan.model_dump()
+                        project.status = ProjectStatus.draft
+                        s.commit()
+                result = {"summary": plan.summary()}
+                self.bus.publish({"type": "project", "project": {"id": out.project_id, "status": "draft", "has_plan": True}})
             else:
                 raise ValueError(f"unknown job kind {out.kind}")
             self._update(job_id, status=JobStatus.succeeded, progress=1.0, result=result, finished_at=_now())
@@ -210,7 +225,7 @@ class JobRunner:
         except JobCancelled:
             self._update(job_id, status=JobStatus.cancelled, error="cancelled by user", finished_at=_now())
             log.info("job %s cancelled", job_id)
-        except ComfyUnavailable as exc:
+        except (ComfyUnavailable, LLMUnavailable) as exc:
             if out.attempt < out.max_attempts:
                 delay = min(2 ** out.attempt, 30)
                 log.warning("job %s: %s; retrying in %ss", job_id, exc, delay)
@@ -218,7 +233,7 @@ class JobRunner:
                 await asyncio.sleep(delay)
             else:
                 self._update(job_id, status=JobStatus.failed, error=str(exc), finished_at=_now())
-        except (ComfyError, WorkflowError, ValueError) as exc:
+        except (ComfyError, LLMError, WorkflowError, ValueError) as exc:
             self._update(job_id, status=JobStatus.failed, error=str(exc), finished_at=_now())
             log.error("job %s failed: %s", job_id, exc)
         finally:

@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     job_max_attempts: int = 3
 
     ollama_url: str = "http://127.0.0.1:11434"
+    # Small enough for CPU-only development; use qwen3:14b on the RTX 5080 PC.
+    ollama_model: str = "qwen3:4b"
+    ollama_timeout_s: float = 900.0
 
     database_url: str = "sqlite:///./data/frameforge.db"
     data_dir: Path = Field(default=Path("./data"))

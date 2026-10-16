@@ -109,6 +109,7 @@ class ProjectOut(BaseModel):
     prompt: str
     settings: dict[str, Any]
     status: ProjectStatus
+    has_plan: bool = False
     created_at: datetime
     updated_at: datetime
     job_count: int = 0
@@ -116,5 +117,15 @@ class ProjectOut(BaseModel):
     _utc = field_validator("created_at", "updated_at")(_as_utc)
 
 
+class LLMStatusResponse(BaseModel):
+    reachable: bool
+    url: str
+    model: str
+    model_available: bool | None = None
+    models: list[str] = Field(default_factory=list)
+    error: str | None = None
+
+
 class ProjectDetail(ProjectOut):
     jobs: list[JobOut] = Field(default_factory=list)
+    plan: dict[str, Any] | None = None

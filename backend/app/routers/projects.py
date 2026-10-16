@@ -4,12 +4,21 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from pydantic import ValidationError
+
 from ..db import get_session
-from ..models import Job, Project
+from ..models import Job, JobStatus, Project, ProjectStatus
+from ..plan import ProductionPlan
 from ..schemas import JobCreate, JobOut, ProjectCreate, ProjectDetail, ProjectOut, ProjectUpdate
 from ..services.workflows import WorkflowError, get_registry
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+def _out(project: Project) -> ProjectOut:
+    item = ProjectOut.model_validate(project)
+    item.has_plan = project.plan is not None
+    return item
 
 
 def _get_or_404(session: Session, project_id: str) -> Project:
@@ -29,7 +38,7 @@ def list_projects(session: Session = Depends(get_session)) -> list[ProjectOut]:
     )
     out: list[ProjectOut] = []
     for project, n in session.execute(stmt):
-        item = ProjectOut.model_validate(project)
+        item = _out(project)
         item.job_count = n
         out.append(item)
     return out
@@ -41,16 +50,65 @@ def create_project(body: ProjectCreate, session: Session = Depends(get_session))
     session.add(project)
     session.commit()
     session.refresh(project)
-    return ProjectOut.model_validate(project)
+    return _out(project)
 
 
 @router.get("/{project_id}", response_model=ProjectDetail)
 def get_project(project_id: str, session: Session = Depends(get_session)) -> ProjectDetail:
     project = _get_or_404(session, project_id)
     detail = ProjectDetail.model_validate(project)
+    detail.has_plan = project.plan is not None
     detail.jobs = [JobOut.model_validate(j) for j in project.jobs]
     detail.job_count = len(detail.jobs)
     return detail
+
+
+# ---------- production plan (Phase 3) ----------
+
+
+@router.post("/{project_id}/plan", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def generate_plan(project_id: str, request: Request, session: Session = Depends(get_session)) -> JobOut:
+    """Queue script/production-plan generation with the local LLM."""
+    project = _get_or_404(session, project_id)
+    active = session.scalars(
+        select(Job.id).where(Job.project_id == project_id, Job.kind == "plan.generate",
+                             Job.status.in_((JobStatus.queued, JobStatus.running))).limit(1)
+    ).first()
+    if active:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"plan generation already queued (job {active})")
+    runner = request.app.state.runner
+    job = Job(project_id=project_id, kind="plan.generate",
+              payload={"prompt": project.prompt, "settings": project.settings}, max_attempts=2)
+    project.status = ProjectStatus.planning
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+    out = JobOut.model_validate(job)
+    runner.bus.publish({"type": "job", "job": out.model_dump(mode="json")})
+    runner.wake()
+    return out
+
+
+@router.get("/{project_id}/plan")
+def get_plan(project_id: str, session: Session = Depends(get_session)) -> dict:
+    project = _get_or_404(session, project_id)
+    if project.plan is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "project has no plan yet")
+    plan = ProductionPlan.model_validate(project.plan)
+    return {"plan": plan.model_dump(), "summary": plan.summary()}
+
+
+@router.put("/{project_id}/plan")
+def put_plan(project_id: str, body: dict, session: Session = Depends(get_session)) -> dict:
+    """Replace the plan (advanced mode editing). The body is validated as a ProductionPlan."""
+    project = _get_or_404(session, project_id)
+    try:
+        plan = ProductionPlan.model_validate(body)
+    except ValidationError as exc:
+        raise HTTPException(422, exc.errors()[0].get("msg", "invalid plan")) from exc
+    project.plan = plan.model_dump()
+    session.commit()
+    return {"plan": plan.model_dump(), "summary": plan.summary()}
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)
@@ -62,7 +120,7 @@ def update_project(
         setattr(project, field, value)
     session.commit()
     session.refresh(project)
-    return ProjectOut.model_validate(project)
+    return _out(project)
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)

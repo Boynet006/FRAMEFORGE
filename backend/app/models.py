@@ -50,6 +50,8 @@ class Project(Base):
     prompt: Mapped[str] = mapped_column(Text)
     # Generation settings chosen in the UI (duration, style, aspect, quality, voices...)
     settings: Mapped[dict] = mapped_column(JSON, default=dict)
+    # ProductionPlan (see app/plan.py) once the planner has run; editable in advanced mode.
+    plan: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[ProjectStatus] = mapped_column(
         Enum(ProjectStatus, native_enum=False), default=ProjectStatus.draft
     )
