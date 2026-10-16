@@ -86,16 +86,39 @@ force-add them. Secrets stay in `backend/.env` and `frontend/.env.local`, which 
 cd backend; .\.venv\Scripts\python.exe -m pytest
 ```
 
-## API (Phase 1)
+## API
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/health` | Backend version, uptime, database check, detected NVIDIA GPUs |
 | GET | `/api/comfy/status` | Live ComfyUI connectivity: version, devices, queue, or the error |
+| POST | `/api/comfy/free` | Ask ComfyUI to unload models and free VRAM |
+| GET | `/api/workflows` | Versioned workflow templates with parameter manifests |
 | GET/POST | `/api/projects` | List / create projects |
 | GET/PATCH/DELETE | `/api/projects/{id}` | Read (with jobs) / update / delete a project |
+| POST | `/api/projects/{id}/jobs` | Queue a workflow run `{workflow, version?, params}` |
 | GET | `/api/jobs` | List jobs, filter by `project_id` and `status` |
 | GET | `/api/jobs/{id}` | Read one job |
+| POST | `/api/jobs/{id}/cancel` | Cancel a queued job or interrupt a running one |
+| POST | `/api/jobs/{id}/retry` | Re-queue a failed or cancelled job |
+| GET | `/api/jobs/{id}/outputs/{file}` | Download a generated output |
+| DELETE | `/api/jobs/{id}` | Delete a finished job and its outputs |
+| WS | `/api/ws` | Live job and project events |
+
+## Workflow templates
+
+Templates live in `backend/workflows/<name>.v<N>.json`: an API-format ComfyUI graph plus an
+`inputs` manifest mapping parameter names to node fields. Add a new version as a new file; the
+API serves the latest unless a version is requested. `validated: false` marks templates that
+have not yet been run on real hardware. `POST /api/workflows/reload` re-reads the folder.
+
+To try the UI without a GPU, run the stand-in ComfyUI from `backend/`:
+
+```powershell
+.\.venv\Scripts\python.exe -m tests.fake_comfy --port 8188
+```
+
+It mimics the real API shapes and produces placeholder files. It is for development only.
 
 ## Troubleshooting
 

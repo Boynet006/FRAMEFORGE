@@ -1,12 +1,12 @@
 # FRAMEFORGE — Project Status
 
-Last updated: 2026-10-16
+Last updated: 2026-10-16 (Phase 2 built)
 
 ## Current phase
 
 **Phase 0 — Environment and feasibility** is still open (waiting for the 5080 PC probe, the
-commercial-use answer and the visual-style answer). **Phase 1 — Project foundation** was built
-in parallel on the dev machine because it needs no GPU; see the table below.
+commercial-use answer and the visual-style answer). **Phases 1 and 2** were built on the dev
+machine because they need no GPU; Phase 2 awaits validation against a real ComfyUI.
 
 ## Summary
 
@@ -14,7 +14,7 @@ in parallel on the dev machine because it needs no GPU; see the table below.
 |---|---|---|
 | 0 Environment & feasibility | In progress | Session machine probed: HP all-in-one, Intel iGPU, 15 GB RAM, **no NVIDIA GPU**. RTX 5080 machine not yet probed. Candidate model stack drafted. See [PHASE0_ENVIRONMENT_REPORT.md](PHASE0_ENVIRONMENT_REPORT.md). |
 | 1 Project foundation | **Done (on the AIO dev machine), 2026-10-16** | FastAPI backend with `/api/health`, `/api/comfy/status`, project + job persistence (SQLite); Next.js 16 + Tailwind 4 dark dashboard; dev scripts; git repo. Tested: 5 backend tests pass, dashboard verified in browser, project created end to end. ComfyUI check truthfully reports "unreachable" here. Remaining: re-run on the 5080 PC with ComfyUI up. |
-| 2 UI + ComfyUI integration | Not started | |
+| 2 UI + ComfyUI integration | **Built and tested against a stand-in ComfyUI, 2026-10-16.** Real-engine validation pending. | Full ComfyUI API client (HTTP + WebSocket), versioned workflow templates, background job runner with cancel/retry/resume, jobs API, WebSocket events, generation UI with live progress and previews. 26 backend tests pass; UI verified in the browser against the stand-in. **Not yet run against a real ComfyUI**; the two templates are marked `validated: false`. |
 | 3 Script & production planning | Not started | |
 | 4 Dialogue & voices | Not started | |
 | 5 Character animation & lip sync | Not started | Highest technical risk: audio-driven animation of non-human characters at 16 GB. |
@@ -61,8 +61,43 @@ Outstanding:
 - Verified only with ComfyUI absent; the "connected" branch of the ComfyUI card is untested
   until ComfyUI runs.
 
-Next: Phase 2 — ComfyUI workflow manager, real image/short-video job submission, live progress,
-cancel/retry, output previews. Requires the 5080 PC with ComfyUI installed (Phase 0 install plan).
+## Phase 2 summary
+
+Built on the dev machine without a GPU, so every ComfyUI interaction was exercised against
+`backend/tests/fake_comfy.py`, a stand-in that reproduces the real API's request/response shapes
+(`POST /prompt`, `GET /history/{id}`, `/view`, `/interrupt`, `/queue`, `/free`, `WS /ws`).
+The application code only ever talks to whatever is at `FRAMEFORGE_COMFYUI_URL`; nothing in the
+runtime fabricates progress.
+
+What works and was tested:
+- `services/comfy_client.py`: submit graph, websocket progress stream, history, output download,
+  interrupt, queue delete, free. Typed errors distinguish "unreachable" (retryable) from
+  "ComfyUI rejected/failed" (not retried automatically).
+- `services/workflows.py` + `workflows/*.v1.json`: versioned templates with parameter manifests;
+  `build()` applies params with type/range checks and random seeds. Templates:
+  `image_basic_txt2img` (ComfyUI default checkpoint graph) and `video_wan22_5b_t2v`
+  (Wan 2.2 5B native template).
+- `services/runner.py`: one job at a time, FIFO, persisted in SQLite. Re-queues jobs left
+  `running` after a restart; retries unreachable ComfyUI up to `FRAMEFORGE_JOB_MAX_ATTEMPTS`
+  with backoff; cancel = `/interrupt` + queue delete; retry re-queues failed/cancelled jobs.
+  Keeps project status in sync (`generating` while jobs are active).
+- API: `GET /api/workflows`, `POST /api/projects/{id}/jobs`, `POST /api/jobs/{id}/cancel`,
+  `POST /api/jobs/{id}/retry`, `GET /api/jobs/{id}/outputs/{file}`, `DELETE /api/jobs/{id}`,
+  `POST /api/comfy/free`, `WS /api/ws`.
+- Frontend: template picker with manifest-driven parameter form, live jobs panel (WebSocket with
+  polling fallback), cancel / retry / delete, image/video/audio previews, download links.
+- Tests: 26 pass (`backend/tests/`), including success, execution error, retry, cancel of running
+  and queued jobs, WebSocket event ordering, unreachable-ComfyUI retry exhaustion, output deletion.
+
+Outstanding before Phase 2 can be called done:
+- Run both templates on the RTX 5080 PC against real ComfyUI and flip `validated` to true.
+  Node names/fields in `video_wan22_5b_t2v.v1.json` were written from the ComfyUI template and
+  need confirmation against the installed ComfyUI version.
+- Output `kind` detection relies on history key/extension heuristics; confirm with real SaveVideo output.
+- No per-job VRAM/throughput metrics yet (Phase 6/8).
+
+Next: close Phase 0 on the 5080 PC (probe, install plan, tests T1–T7), validate Phase 2 there,
+then Phase 3 (local LLM script and production planning).
 
 ## Files
 
