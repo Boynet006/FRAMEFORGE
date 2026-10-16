@@ -24,6 +24,9 @@ from ..plan import ProductionPlan
 from ..schemas import JobOut
 from .comfy_client import ComfyClient, ComfyError, ComfyUnavailable
 from .engines.comfy_engine import ComfyEngine, JobCancelled
+from .engines.animate_engine import AnimateEngine, AnimateError
+from .engines.assemble_engine import AssembleEngine, AssembleError
+from .engines.pipeline_engine import PipelineEngine
 from .engines.plan_engine import PlanEngine
 from .engines.refs_engine import RefsEngine
 from .engines.tts_engine import TTSEngine, TTSError
@@ -229,34 +232,22 @@ class JobRunner:
                     persist_payload=persist_payload,
                     cancel_requested=lambda: job_id in self._cancel_requested,
                 )
-            elif out.kind == "plan.generate":
-                llm = OllamaClient(self.ollama_url, self.settings.ollama_model, self.settings.ollama_timeout_s)
-                plan = await PlanEngine(llm).run(out.payload.get("settings") or {}, out.payload["prompt"], progress=progress)
-                await llm.unload()
+            elif out.kind in ("plan.generate", "tts.generate", "refs.generate", "animate.render", "assemble.render"):
+                result = await self._run_stage(out.kind.split(".")[0], job_id, out, progress)
+            elif out.kind == "pipeline.full":
+                pipeline = PipelineEngine(
+                    lambda stage, prog: self._run_stage(stage, job_id, out, prog),
+                    self.project_dir(out.project_id),
+                    has_plan=lambda: self._has_plan(out.project_id),
+                    force=bool(out.payload.get("force")),
+                )
+                result = await pipeline.run(progress=progress)
                 with SessionLocal() as s:
                     project = s.get(Project, out.project_id)
                     if project is not None:
-                        project.plan = plan.model_dump()
-                        project.status = ProjectStatus.draft
+                        project.status = ProjectStatus.completed if result.get("ok") else ProjectStatus.failed
                         s.commit()
-                result = {"summary": plan.summary()}
-                self.bus.publish({"type": "project", "project": {"id": out.project_id, "status": "draft", "has_plan": True}})
-            elif out.kind == "refs.generate":
-                plan = self._load_plan(out.project_id)
-                refs = RefsEngine(self._comfy_engine(), out.payload.get("workflow") or self.settings.image_workflow,
-                                  force=bool(out.payload.get("force")))
-
-                async def persist_plan(p: ProductionPlan) -> None:
-                    self._save_plan(out.project_id, p)
-
-                result = await refs.run(plan, self.project_dir(out.project_id), job_id, progress=progress,
-                                        persist_plan=persist_plan,
-                                        cancel_requested=lambda: job_id in self._cancel_requested)
-                self._save_plan(out.project_id, plan)
-            elif out.kind == "tts.generate":
-                plan = self._load_plan(out.project_id)
-                engine = TTSEngine(self.settings.resolved_tts_python, self.settings.tts_engine, self.settings.tts_lang)
-                result = await engine.run(plan, self.project_dir(out.project_id), progress=progress)
+                        self.bus.publish({"type": "project", "project": {"id": project.id, "status": project.status.value}})
             else:
                 raise ValueError(f"unknown job kind {out.kind}")
             self._update(job_id, status=JobStatus.succeeded, progress=1.0, result=result, finished_at=_now())
@@ -272,12 +263,70 @@ class JobRunner:
                 await asyncio.sleep(delay)
             else:
                 self._update(job_id, status=JobStatus.failed, error=str(exc), finished_at=_now())
-        except (ComfyError, LLMError, TTSError, WorkflowError, ValueError, RuntimeError) as exc:
+        except (ComfyError, LLMError, TTSError, AnimateError, AssembleError, WorkflowError, ValueError,
+                RuntimeError, FileNotFoundError) as exc:
             self._update(job_id, status=JobStatus.failed, error=str(exc), finished_at=_now())
             log.error("job %s failed: %s", job_id, exc)
         finally:
             self._cancel_requested.discard(job_id)
             self.current_job_id = None
+
+    # ---------- pipeline stages ----------
+
+    def _has_plan(self, project_id: str) -> bool:
+        with SessionLocal() as s:
+            project = s.get(Project, project_id)
+            return project is not None and project.plan is not None
+
+    async def _run_stage(self, stage: str, job_id: str, out: JobOut, progress: Any) -> dict[str, Any]:
+        """Run one named production stage for the job's project. Shared by stage jobs and the pipeline."""
+        project_dir = self.project_dir(out.project_id)
+        payload = out.payload
+        if stage == "plan":
+            with SessionLocal() as s:
+                project = s.get(Project, out.project_id)
+                if project is None:
+                    raise ValueError("project disappeared")
+                prompt, settings = project.prompt, dict(project.settings)
+            llm = OllamaClient(self.ollama_url, self.settings.ollama_model, self.settings.ollama_timeout_s)
+            plan = await PlanEngine(llm).run(settings, prompt, progress=progress)
+            await llm.unload()
+            with SessionLocal() as s:
+                project = s.get(Project, out.project_id)
+                if project is not None:
+                    project.plan = plan.model_dump()
+                    if project.status == ProjectStatus.planning:
+                        project.status = ProjectStatus.draft
+                    s.commit()
+            self.bus.publish({"type": "project", "project": {"id": out.project_id, "has_plan": True}})
+            return {"summary": plan.summary()}
+
+        plan = self._load_plan(out.project_id)
+        if stage == "tts":
+            engine = TTSEngine(self.settings.resolved_tts_python, self.settings.tts_engine, self.settings.tts_lang)
+            return await engine.run(plan, project_dir, progress=progress)
+        if stage == "refs":
+            refs = RefsEngine(self._comfy_engine(), payload.get("workflow") or self.settings.image_workflow,
+                              force=bool(payload.get("force") or payload.get("force_refs")))
+
+            async def persist_plan(p: ProductionPlan) -> None:
+                self._save_plan(out.project_id, p)
+
+            result = await refs.run(plan, project_dir, job_id, progress=progress, persist_plan=persist_plan,
+                                    cancel_requested=lambda: job_id in self._cancel_requested)
+            self._save_plan(out.project_id, plan)
+            return result
+        if stage == "animate":
+            with SessionLocal() as s:
+                project = s.get(Project, out.project_id)
+                quality = str((project.settings if project else {}).get("quality") or "draft")
+            engine = AnimateEngine(self.settings.resolved_tts_python, self.settings.ffmpeg)
+            return await engine.run(plan, project_dir, quality, progress=progress,
+                                    max_seconds=float(payload.get("max_seconds") or 0))
+        if stage == "assemble":
+            engine = AssembleEngine(self.settings.resolved_tts_python, self.settings.ffmpeg, self.settings.ffprobe)
+            return await engine.run(plan, project_dir, progress=progress)
+        raise ValueError(f"unknown stage {stage}")
 
     def _update(self, job_id: str, **fields: Any) -> None:
         with SessionLocal() as s:

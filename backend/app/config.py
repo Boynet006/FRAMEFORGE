@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     tts_python: Path = Field(default=Path("./.venv-tts/Scripts/python.exe"))
     tts_lang: str = "a"  # Kokoro language code: a = American English, b = British English
 
+    # Media workers (animator, music) share the TTS venv. FFmpeg from PATH unless overridden.
+    ffmpeg: str = "ffmpeg"
+    ffprobe: str = "ffprobe"
+    # "cpu" = procedural animatic renderer (this machine); "gpu" = ComfyUI video models (RTX 5080, later phases)
+    render_mode: str = "cpu"
+
     database_url: str = "sqlite:///./data/frameforge.db"
     data_dir: Path = Field(default=Path("./data"))
 

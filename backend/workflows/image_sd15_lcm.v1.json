@@ -2,9 +2,9 @@
   "name": "image_sd15_lcm",
   "version": 1,
   "engine": "comfyui",
-  "description": "Fast image with Stable Diffusion 1.5 + LCM LoRA (6 steps, CFG 1.5). The CPU-mode reference-image generator; also fine on any GPU.",
+  "description": "Fast image with Stable Diffusion 1.5 + LCM LoRA (6 steps, CFG 1.5). The CPU-mode reference-image generator; also fine on any GPU. Validated on ComfyUI 0.41 CPU: 512x640 in ~70 s after model load on a 20-core CPU.",
   "output_kind": "image",
-  "validated": false,
+  "validated": true,
   "requires": {
     "models": [
       "checkpoints/v1-5-pruned-emaonly-fp16.safetensors",

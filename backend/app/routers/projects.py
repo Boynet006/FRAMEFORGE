@@ -105,6 +105,67 @@ def generate_refs(project_id: str, request: Request, force: bool = False,
     return _queue_stage(session, request, project, "refs.generate", {"force": force}, max_attempts=3)
 
 
+@router.post("/{project_id}/animate", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def animate(project_id: str, request: Request, max_seconds: float = 0,
+            session: Session = Depends(get_session)) -> JobOut:
+    """Render the silent picture track from the plan, references and dialogue timeline."""
+    project = _get_or_404(session, project_id)
+    if project.plan is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "generate the plan first")
+    return _queue_stage(session, request, project, "animate.render", {"max_seconds": max_seconds})
+
+
+@router.post("/{project_id}/assemble", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def assemble(project_id: str, request: Request, session: Session = Depends(get_session)) -> JobOut:
+    """Mux picture, dialogue, music and subtitles into render/final.mp4 with quality checks."""
+    project = _get_or_404(session, project_id)
+    if project.plan is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "generate the plan first")
+    return _queue_stage(session, request, project, "assemble.render")
+
+
+@router.post("/{project_id}/generate", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def generate_full(project_id: str, request: Request, force: bool = False,
+                  session: Session = Depends(get_session)) -> JobOut:
+    """Generate the complete video: plan -> voices -> references -> animation -> final MP4.
+
+    Finished stages are reused on re-runs unless force=true.
+    """
+    project = _get_or_404(session, project_id)
+    active = session.scalars(
+        select(Job.id).where(Job.project_id == project_id,
+                             Job.status.in_((JobStatus.queued, JobStatus.running))).limit(1)
+    ).first()
+    if active:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"project already has an active job ({active})")
+    return _queue_stage(session, request, project, "pipeline.full", {"force": force}, max_attempts=2)
+
+
+@router.get("/{project_id}/render")
+def get_render(project_id: str, request: Request, session: Session = Depends(get_session)) -> dict:
+    """What exists on disk for this project: refs, audio, picture track, final video."""
+    _get_or_404(session, project_id)
+    root = request.app.state.runner.project_dir(project_id)
+
+    def info(rel: str) -> dict | None:
+        p = root / rel
+        if not p.is_file():
+            return None
+        return {"path": rel, "size": p.stat().st_size, "url": f"/api/projects/{project_id}/files/{rel}"}
+
+    refs = sorted(p.name for p in (root / "refs").glob("*.png")) if (root / "refs").is_dir() else []
+    return {
+        "plan": root.joinpath("plan.json").is_file(),
+        "dialogue": info("audio/dialogue.wav"),
+        "timeline": info("audio/dialogue.json"),
+        "music": info("audio/music.wav"),
+        "refs": [info(f"refs/{n}") for n in refs if not n.startswith("cutout_")],
+        "video_silent": info("render/video_silent.mp4"),
+        "subtitles": info("render/subtitles.srt"),
+        "final": info("render/final.mp4"),
+    }
+
+
 @router.get("/{project_id}/timeline")
 def get_timeline(project_id: str, request: Request, session: Session = Depends(get_session)) -> dict:
     """The timed dialogue manifest produced by the TTS stage."""

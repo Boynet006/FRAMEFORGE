@@ -25,11 +25,23 @@ import uvicorn
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 
-# 1x1 transparent PNG
-_PNG = bytes.fromhex(
-    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da6364"
-    "f8cfc0000000030001a5e7b76a0000000049454e44ae426082"
-)
+import struct
+import zlib
+
+
+def make_png(width: int = 64, height: int = 80, rgb: tuple[int, int, int] = (200, 120, 60)) -> bytes:
+    """A small valid RGB PNG, built with the standard library only."""
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+    row = b"\x00" + bytes(rgb) * width
+    raw = row * height
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b""))
+
+
+_PNG = make_png()
 
 
 class FakeComfy:

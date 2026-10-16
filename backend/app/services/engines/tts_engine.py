@@ -24,8 +24,9 @@ log = logging.getLogger(__name__)
 
 ProgressCb = Callable[[float, str | None], Awaitable[None]]
 WORKER = Path(__file__).resolve().parent.parent.parent.parent / "tts_worker" / "kokoro_worker.py"
-SCENE_GAP_S = 0.7
-LEAD_IN_S = 0.5
+LEAD_IN_S = 1.5      # establishing shot before the first line of the film
+SCENE_GAP_S = 1.0    # establishing shot at the start of every later scene
+TAIL_S = 0.6         # hold after the last line of a scene
 
 
 class TTSError(RuntimeError):
@@ -93,11 +94,12 @@ class TTSEngine:
 
     @staticmethod
     def _layout(plan: ProductionPlan, by_id: dict[str, dict[str, Any]]) -> dict[str, Any]:
-        t = LEAD_IN_S
+        t = 0.0
         lines: list[dict[str, Any]] = []
         scenes: list[dict[str, Any]] = []
-        for scene in plan.scenes:
+        for si, scene in enumerate(plan.scenes):
             scene_start = t
+            t += LEAD_IN_S if si == 0 else SCENE_GAP_S
             for i, line in enumerate(scene.lines):
                 r = by_id.get(line.id)
                 if r is None:
@@ -110,8 +112,7 @@ class TTSEngine:
                     "words": [{**w, "start_s": round(start + w["start_s"], 3), "end_s": round(start + w["end_s"], 3)}
                               for w in r.get("words", [])],
                 })
-                t = end + (line.pause_after_s if i < len(scene.lines) - 1 else 0.0)
-            t += SCENE_GAP_S
+                t = end + (line.pause_after_s if i < len(scene.lines) - 1 else TAIL_S)
             scenes.append({"id": scene.id, "environment_id": scene.environment_id, "start_s": round(scene_start, 3),
                            "end_s": round(t, 3)})
         return {"version": 1, "duration_s": round(t, 3), "scenes": scenes, "lines": lines}

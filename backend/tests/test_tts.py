@@ -51,12 +51,14 @@ def test_fake_engine_layout_and_mix(tmp_path: Path):
     tl = json.loads((tmp_path / "audio" / "dialogue.json").read_text())
     lines = tl["lines"]
     assert [l["id"] for l in lines] == ["s1l1", "s1l2", "s2l1"]
-    # monotonic, non-overlapping, pauses and scene gap respected
-    assert lines[0]["start_s"] == 0.5
+    # monotonic, non-overlapping; lead-in, pauses, tail and scene establishing gap respected
+    assert lines[0]["start_s"] == 1.5
     assert lines[1]["start_s"] >= lines[0]["end_s"] + 0.3 - 1e-6
-    assert lines[2]["start_s"] >= lines[1]["end_s"] + 0.7 - 1e-6
+    assert lines[2]["start_s"] >= lines[1]["end_s"] + 0.6 + 1.0 - 1e-6
     assert tl["duration_s"] >= lines[2]["end_s"]
-    assert len(tl["scenes"]) == 2 and tl["scenes"][1]["start_s"] <= lines[2]["start_s"]
+    assert len(tl["scenes"]) == 2
+    assert tl["scenes"][0]["start_s"] == 0.0 and tl["scenes"][1]["start_s"] == tl["scenes"][0]["end_s"]
+    assert tl["scenes"][1]["start_s"] + 1.0 <= lines[2]["start_s"] + 1e-6
     # word timings are absolute and inside the line
     w = lines[0]["words"]
     assert len(w) == 6 and w[0]["start_s"] >= lines[0]["start_s"] and w[-1]["end_s"] <= lines[0]["end_s"] + 1e-6
