@@ -72,6 +72,9 @@ class WorkflowTemplate:
     outputs: list[dict[str, str]]
     graph: dict[str, Any]
     path: Path = field(repr=False)
+    # Free-form hints for engines that drive the template, e.g. native sizes
+    # {"character_size": [w, h], "environment_size": [w, h]} for reference images.
+    hints: dict[str, Any] = field(default_factory=dict)
 
     @property
     def key(self) -> str:
@@ -96,6 +99,7 @@ class WorkflowTemplate:
                 for k, s in self.inputs.items()
             },
             "outputs": self.outputs,
+            "hints": self.hints,
         }
 
     def build(self, params: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -149,6 +153,7 @@ def _parse(path: Path) -> WorkflowTemplate:
         outputs=data.get("outputs", []),
         graph=graph,
         path=path,
+        hints=data.get("hints", {}),
     )
 
 

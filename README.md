@@ -67,8 +67,8 @@ powershell -ExecutionPolicy Bypass -File scripts\run-comfyui-cpu.ps1
 ```
 
 **NVIDIA GPU machines** (RTX 4090 laptop, RTX 5080): pull `qwen3:14b` instead of `qwen3:4b`, set
-`FRAMEFORGE_OLLAMA_MODEL=qwen3:14b` in `backend\.env`, and install ComfyUI with CUDA PyTorch
-(same models and templates as the CPU install):
+`FRAMEFORGE_OLLAMA_MODEL=qwen3:14b` and `FRAMEFORGE_IMAGE_WORKFLOW=image_sdxl` in `backend\.env`, and
+install ComfyUI with CUDA PyTorch (adds SDXL base 1.0, about 7 GB, to the CPU install's models):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\install-comfyui-gpu.ps1

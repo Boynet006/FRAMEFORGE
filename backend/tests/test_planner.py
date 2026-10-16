@@ -34,6 +34,17 @@ def test_engine_builds_valid_plan(fake_ollama):
     assert fake_ollama.fake.calls[0]["think"] is False and fake_ollama.fake.calls[0]["format"]["type"] == "object"
 
 
+def test_character_image_prompt_leads_with_species():
+    from app.services.engines.plan_engine import character_image_prompt
+
+    p = character_image_prompt("cat", "calico with a pink nose, tiny chef's hat")
+    assert p.startswith("character portrait of a single cat, calico")
+    assert "clearly a cat" in p
+    assert "clearly an old man" in character_image_prompt("old man", "grey beard")
+    # no species from an older plan / model: still a valid prompt, no dangling article
+    assert character_image_prompt("", "red robot").startswith("character portrait, red robot")
+
+
 def test_engine_missing_model_is_error(fake_ollama):
     llm = OllamaClient(fake_ollama.url, "nope:1b", timeout_s=5)
     with pytest.raises(LLMError):

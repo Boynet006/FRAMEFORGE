@@ -1,6 +1,6 @@
 # FRAMEFORGE — Project Status
 
-Last updated: 2026-10-16 (pipeline running live on an RTX 4090 laptop with CUDA ComfyUI)
+Last updated: 2026-10-16 (RTX 4090 laptop: SDXL references, Simple/Advanced UI)
 
 ## Current phase
 
@@ -91,8 +91,29 @@ Outstanding:
   22 shots / 1665 frames at 960x540, final.mp4 with 19 subtitle cues; all QC checks passed.
   Spot-checked 4 frames: subtitles readable, speaker's mouth opens, wide/close-up cuts work.
   Seen problem: the second "cat" came out puppy-like (SD 1.5 prompt adherence). Audio not reviewed.
-- Next on this machine: a better image template (SDXL or Qwen-Image) now that VRAM allows it, then the
-  GPU animate path (Wan 2.2 S2V, Phase 0 tests T1–T7), which this laptop can run as a 5080 stand-in.
+- **SDXL references (validated):** new `image_sdxl` template (SDXL base 1.0, 28 steps, ~9 s per image at
+  896x1152 / 1344x768 on the 4090). Templates can now declare native sizes in `"hints"`; the refs stage uses
+  them (SD 1.5 sizes stay the fallback). `POST /projects/{id}/refs?workflow=...` overrides the template per
+  run. This machine's `.env` uses `FRAMEFORGE_IMAGE_WORKFLOW=image_sdxl`.
+- **Puppy bug root cause:** image prompts never named the species ("Waffles, calico…") and included the
+  character's name, so the image model guessed a dog. Plan characters now have a `species` field (LLM
+  instructed: basic kind of being, never a coat/breed); `character_image_prompt()` leads with and repeats
+  it and drops the name. Live check with qwen3:14b: "Waffles the calico" → `species='cat'`.
+- **Second live run (SDXL, via the new Simple UI):** "Café cats" example, 60 s, 3D animated — succeeded
+  in ~4 min, both characters clearly cats, QC passed (57.7 s, 12 cues).
+- **Simple / Advanced UI toggle** (header, remembered in localStorage, default Simple). Simple: one-line
+  engine readiness with fix-it hints, "Make a video" form (prompt tips + examples, Length/Look/Quality
+  chips; creates the project and starts the pipeline in one click), "Your videos" with plain statuses,
+  friendly step progress, Try again on failure (resumes from checkpoints), big player + Download, script
+  collapsed and read-only, "Make a new version" (force re-run, confirmed). Advanced: the previous full
+  UI with editing always on. The open project is also remembered across reloads.
+- **Fixed:** the final-video player and download links used backend-relative URLs and 404'd against the
+  frontend origin (the player never played). URLs are now made absolute in `api.getRender`, and
+  `files/...?download=true` sends a Content-Disposition attachment named after the project.
+- Aspect ratio is stored but the CPU animator always renders 16:9; Simple hides it, Advanced labels it.
+- Tests: 40/40. `conftest.py` also pins `IMAGE_WORKFLOW` and `RENDER_MODE` against `.env` leaks.
+- Next on this machine: the GPU animate path (Wan 2.2 S2V, Phase 0 tests T1–T7), which this laptop can
+  run as a 5080 stand-in; per-shot regeneration; character/environment consistency across shots.
 
 ## Handoff — where to pick up on the next machine
 

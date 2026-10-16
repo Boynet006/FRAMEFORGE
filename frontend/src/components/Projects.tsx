@@ -16,6 +16,16 @@ const statusTone: Record<ProjectStatus, Tone> = {
   cancelled: "idle",
 };
 
+const friendlyStatus: Record<ProjectStatus, string> = {
+  draft: "Not started",
+  planning: "Being made…",
+  generating: "Being made…",
+  assembling: "Being made…",
+  completed: "Ready to watch",
+  failed: "Something went wrong",
+  cancelled: "Stopped",
+};
+
 const DURATIONS = [30, 60, 120, 300, 600];
 const ASPECTS = ["16:9", "9:16", "1:1"];
 const STYLES = ["cinematic", "cartoon", "3d-animated", "photoreal", "anime"];
@@ -84,8 +94,8 @@ export function NewProject({ onCreated }: { onCreated: (p: Project) => void }) {
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-xs text-muted">
-            Aspect
+          <label className="flex flex-col gap-1 text-xs text-muted" title="Stored in the plan; the CPU animator renders 16:9 for now">
+            Aspect (renders 16:9)
             <select value={aspect} onChange={(e) => setAspect(e.target.value)} className={select}>
               {ASPECTS.map((a) => <option key={a}>{a}</option>)}
             </select>
@@ -104,7 +114,7 @@ export function NewProject({ onCreated }: { onCreated: (p: Project) => void }) {
           </label>
         </div>
         <div className="flex items-center justify-between gap-3">
-          <p className="text-xs text-muted">The full prompt-to-film pipeline arrives in later phases.</p>
+          <p className="text-xs text-muted">Creates the project; start it from the Production panel.</p>
           <button
             type="submit"
             disabled={busy || !prompt.trim()}
@@ -124,12 +134,14 @@ export function ProjectList({
   onSelect,
   onRefresh,
   error,
+  simple = false,
 }: {
   projects: Project[] | null;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onRefresh: () => void;
   error: string | null;
+  simple?: boolean;
 }) {
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -146,16 +158,20 @@ export function ProjectList({
 
   return (
     <Card
-      title={`Projects${projects ? ` (${projects.length})` : ""}`}
+      title={`${simple ? "Your videos" : "Projects"}${projects ? ` (${projects.length})` : ""}`}
       right={
-        <button onClick={onRefresh} className="text-xs text-muted hover:text-foreground">
-          refresh
-        </button>
+        simple ? undefined : (
+          <button onClick={onRefresh} className="text-xs text-muted hover:text-foreground">
+            refresh
+          </button>
+        )
       }
     >
       {(error || actionError) && <p className="text-sm text-bad break-words">{error ?? actionError}</p>}
       {projects === null && !error && <p className="text-sm text-muted">Loading…</p>}
-      {projects?.length === 0 && <p className="text-sm text-muted">No projects yet.</p>}
+      {projects?.length === 0 && (
+        <p className="text-sm text-muted">{simple ? "Nothing here yet. Describe a video on the left and press “Make my video”." : "No projects yet."}</p>
+      )}
       <ul className="flex flex-col divide-y divide-border">
         {projects?.map((p) => {
           const active = p.id === selectedId;
@@ -171,13 +187,22 @@ export function ProjectList({
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="truncate font-medium">{p.title}</span>
-                  <span className="shrink-0 font-mono text-[11px] text-muted">{p.id}</span>
+                  {!simple && <span className="shrink-0 font-mono text-[11px] text-muted">{p.id}</span>}
                 </div>
                 <p className="line-clamp-2 text-sm text-muted">{p.prompt}</p>
-                <p className="mt-1 text-xs text-muted">
-                  {p.status} · {String(p.settings.duration_s ?? "?")} s · {String(p.settings.aspect_ratio ?? "")} ·{" "}
-                  {String(p.settings.style ?? "")} · {p.job_count} jobs · {new Date(p.created_at).toLocaleString()}
-                </p>
+                {simple ? (
+                  <p className="mt-1 text-xs text-muted">
+                    <span className={p.status === "failed" ? "text-bad" : p.status === "completed" ? "text-ok" : ""}>
+                      {friendlyStatus[p.status]}
+                    </span>{" "}
+                    · {new Date(p.created_at).toLocaleDateString()}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-muted">
+                    {p.status} · {String(p.settings.duration_s ?? "?")} s · {String(p.settings.aspect_ratio ?? "")} ·{" "}
+                    {String(p.settings.style ?? "")} · {p.job_count} jobs · {new Date(p.created_at).toLocaleString()}
+                  </p>
+                )}
               </div>
               <button
                 onClick={(e) => {

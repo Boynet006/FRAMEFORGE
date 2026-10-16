@@ -25,6 +25,7 @@ class Character(BaseModel):
     name: str
     role: str = ""
     personality: str = ""
+    species: str = Field(default="", description="what the character is, e.g. 'cat', 'woman', 'golden retriever'")
     appearance: str = Field(default="", description="visual description used in image prompts")
     image_prompt: str = ""
     negative_prompt: str = "blurry, low quality, text, watermark, extra limbs, deformed"

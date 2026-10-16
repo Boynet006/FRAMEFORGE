@@ -22,6 +22,17 @@ log = logging.getLogger(__name__)
 
 ProgressCb = Callable[[float, str | None], Awaitable[None]]
 
+
+def character_image_prompt(species: str, appearance: str) -> str:
+    """Prompt for a character reference image. The species leads and is repeated so the image model
+    cannot drift (an unnamed 'calico' called 'Waffles' came out as a puppy). The character's name is
+    left out on purpose: names carry their own visual bias."""
+    article = "an" if species[:1].lower() in "aeiou" and species else "a"
+    head = f"character portrait of a single {species}" if species else "character portrait"
+    tail = f", clearly {article} {species}" if species else ""
+    return f"{head}, {appearance}{tail}, full head and shoulders, facing camera, centered, " \
+           f"plain neutral background, soft lighting, high detail"
+
 # Kokoro voices grouped so distinct characters get distinct voices.
 KOKORO_VOICES = {
     "female": ["af_heart", "af_bella", "af_sarah", "bf_emma", "af_nicole", "bf_isabella"],
@@ -42,10 +53,11 @@ _OUTLINE_SCHEMA: dict[str, Any] = {
                     "name": {"type": "string"},
                     "role": {"type": "string"},
                     "personality": {"type": "string"},
+                    "species": {"type": "string"},
                     "appearance": {"type": "string"},
                     "voice_gender": {"type": "string", "enum": ["female", "male"]},
                 },
-                "required": ["name", "role", "personality", "appearance", "voice_gender"],
+                "required": ["name", "role", "personality", "species", "appearance", "voice_gender"],
             },
         },
         "environments": {
@@ -199,8 +211,11 @@ class PlanEngine:
             f"Create the outline for a {duration}-second {style} dialogue video.\n"
             f"User request: {prompt}\n\n"
             f"Rules:\n"
-            f"- Characters: as described by the request (default two). Give each a distinct personality, a vivid visual "
-            f"appearance for an image generator (species, colours, clothing, defining features) and a voice_gender.\n"
+            f"- Characters: as described by the request (default two). Give each a distinct personality, a species "
+            f"(the basic kind of being in one or two words, as the request implies: 'cat', 'dog', 'penguin', 'robot', "
+            f"'old man', 'woman'. Never a breed, coat pattern or colour on its own: 'cat', not 'calico' or 'tabby'), a "
+            f"vivid visual appearance for an image generator (breed or coat, colours, clothing, defining features) and "
+            f"a voice_gender.\n"
             f"- Environments: 1 to {max(1, n_scenes)} named locations with concrete visual descriptions.\n"
             f"- Scenes: exactly {n_scenes} scene(s). Each names one environment, a short summary of what happens, "
             f"a time_of_day, and a word_budget. The word budgets must add up to about {total_words} words total.\n"
@@ -261,11 +276,11 @@ class PlanEngine:
                 cid += "_"
             ids.add(cid)
             appearance = str(c.get("appearance", ""))
+            species = str(c.get("species", "")).strip()
             out.append(Character(
                 id=cid, name=c["name"], role=str(c.get("role", "")), personality=str(c.get("personality", "")),
-                appearance=appearance,
-                image_prompt=f"character portrait of {c['name']}, {appearance}, facing camera, centered, "
-                             f"neutral background, soft lighting, high detail",
+                species=species, appearance=appearance,
+                image_prompt=character_image_prompt(species, appearance),
                 voice=Voice(voice=voice),
             ))
         return out

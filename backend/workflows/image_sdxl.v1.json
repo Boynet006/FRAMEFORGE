@@ -1,0 +1,38 @@
+{
+  "name": "image_sdxl",
+  "version": 1,
+  "engine": "comfyui",
+  "description": "Stable Diffusion XL 1.0 base at ~1 megapixel (28 steps, DPM++ 2M Karras, CFG 6.5). Reference-image generator for NVIDIA GPUs with 8+ GB VRAM: sharper characters and much better prompt adherence than SD 1.5. Too slow for CPU mode. Validated on ComfyUI 0.41 + RTX 4090 Laptop (torch 2.14 cu130): 896x1152 or 1344x768 in ~9 s after a ~17 s first-load.",
+  "output_kind": "image",
+  "validated": true,
+  "requires": {
+    "models": [
+      "checkpoints/sd_xl_base_1.0.safetensors"
+    ],
+    "license": "CreativeML OpenRAIL++-M (commercial use of outputs allowed under its use restrictions)"
+  },
+  "hints": {
+    "character_size": [896, 1152],
+    "environment_size": [1344, 768]
+  },
+  "inputs": {
+    "prompt":          {"node": "6",  "field": "text",      "type": "string",  "default": "portrait of a cat, soft light", "label": "Prompt"},
+    "negative_prompt": {"node": "7",  "field": "text",      "type": "string",  "default": "blurry, low quality, watermark, text, deformed", "label": "Negative prompt"},
+    "checkpoint":      {"node": "4",  "field": "ckpt_name", "type": "string",  "default": "sd_xl_base_1.0.safetensors", "label": "Checkpoint file"},
+    "width":           {"node": "5",  "field": "width",     "type": "integer", "default": 1024, "min": 512, "max": 2048, "step": 64, "label": "Width"},
+    "height":          {"node": "5",  "field": "height",    "type": "integer", "default": 1024, "min": 512, "max": 2048, "step": 64, "label": "Height"},
+    "steps":           {"node": "3",  "field": "steps",     "type": "integer", "default": 28, "min": 10, "max": 60, "label": "Steps"},
+    "cfg":             {"node": "3",  "field": "cfg",       "type": "number",  "default": 6.5, "min": 1, "max": 12, "label": "CFG"},
+    "seed":            {"node": "3",  "field": "seed",      "type": "integer", "default": -1, "label": "Seed (-1 = random)"}
+  },
+  "outputs": [{"node": "9", "kind": "image"}],
+  "graph": {
+    "4":  {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "sd_xl_base_1.0.safetensors"}},
+    "5":  {"class_type": "EmptyLatentImage", "inputs": {"width": 1024, "height": 1024, "batch_size": 1}},
+    "6":  {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["4", 1]}},
+    "7":  {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["4", 1]}},
+    "3":  {"class_type": "KSampler", "inputs": {"seed": 0, "steps": 28, "cfg": 6.5, "sampler_name": "dpmpp_2m", "scheduler": "karras", "denoise": 1.0, "model": ["4", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["5", 0]}},
+    "8":  {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
+    "9":  {"class_type": "SaveImage", "inputs": {"filename_prefix": "FRAMEFORGE/ref", "images": ["8", 0]}}
+  }
+}

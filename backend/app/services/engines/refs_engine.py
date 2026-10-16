@@ -14,15 +14,31 @@ from pathlib import Path
 from typing import Any
 
 from ...plan import ProductionPlan
+from ..workflows import WorkflowError, get_registry
 from .comfy_engine import ComfyEngine
 
 log = logging.getLogger(__name__)
 
 ProgressCb = Callable[[float, str | None], Awaitable[None]]
 
-# Portrait for characters, 16:9 for environments (multiples of 8 for SD).
+# Portrait for characters, 16:9 for environments (multiples of 8 for SD 1.5). Templates built for
+# other models declare their native sizes in "hints" (character_size / environment_size).
 CHARACTER_SIZE = (512, 640)
 ENVIRONMENT_SIZE = (768, 432)
+
+
+def ref_sizes(workflow: str) -> tuple[tuple[int, int], tuple[int, int]]:
+    """(character_size, environment_size) for an image template, falling back to the SD 1.5 sizes."""
+    try:
+        hints = get_registry().get(workflow).hints
+    except WorkflowError:
+        hints = {}
+
+    def pick(key: str, default: tuple[int, int]) -> tuple[int, int]:
+        v = hints.get(key)
+        return (int(v[0]), int(v[1])) if isinstance(v, (list, tuple)) and len(v) == 2 else default
+
+    return pick("character_size", CHARACTER_SIZE), pick("environment_size", ENVIRONMENT_SIZE)
 
 STYLE_HINTS = {
     "cinematic": "cinematic lighting, film still, shallow depth of field",
@@ -45,11 +61,12 @@ class RefsEngine:
         refs_dir = project_dir / "refs"
         refs_dir.mkdir(parents=True, exist_ok=True)
         style = STYLE_HINTS.get(plan.style, plan.style)
+        char_size, env_size = ref_sizes(self.workflow)
         targets: list[tuple[str, str, str, tuple[int, int], str]] = []
         for c in plan.characters:
-            targets.append(("character", c.id, f"{c.image_prompt}, {style}", CHARACTER_SIZE, c.negative_prompt))
+            targets.append(("character", c.id, f"{c.image_prompt}, {style}", char_size, c.negative_prompt))
         for e in plan.environments:
-            targets.append(("environment", e.id, f"{e.image_prompt}, {style}", ENVIRONMENT_SIZE,
+            targets.append(("environment", e.id, f"{e.image_prompt}, {style}", env_size,
                             "people, person, text, watermark, blurry, low quality"))
 
         generated: list[dict[str, Any]] = []

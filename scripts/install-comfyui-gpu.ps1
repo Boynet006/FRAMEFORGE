@@ -1,7 +1,7 @@
 # Install ComfyUI with CUDA PyTorch for NVIDIA GPUs (RTX 4090 laptop, RTX 5080).
 #   powershell -ExecutionPolicy Bypass -File scripts\install-comfyui-gpu.ps1 [-Dir C:\AI\ComfyUI] [-Cuda cu130]
-# Installs: ComfyUI (git), a Python 3.12 venv with CUDA PyTorch, Stable Diffusion 1.5 (fp16) and the
-# LCM LoRA used by the image_sd15_lcm template (same models as the CPU install, so templates are shared).
+# Installs: ComfyUI (git), a Python 3.12 venv with CUDA PyTorch, Stable Diffusion 1.5 (fp16) + LCM LoRA
+# (image_sd15_lcm, shared with the CPU install) and SDXL base 1.0 (image_sdxl, the GPU default).
 # cu130 wheels cover Ada (RTX 40xx) and Blackwell (RTX 50xx) and need an NVIDIA driver with CUDA 13
 # support (580+). The cu128 index stopped at torch 2.11; use -Cuda cu128 only with an older driver.
 # Licenses: ComfyUI GPL-3.0; SD 1.5 CreativeML OpenRAIL-M; LCM-LoRA OpenRAIL-M.
@@ -40,7 +40,13 @@ try {
     Write-Host "Downloading LCM LoRA for SD 1.5 (~135 MB)..."
     curl.exe -L --fail --retry 5 -o $lora "https://huggingface.co/latent-consistency/lcm-lora-sdv1-5/resolve/main/pytorch_lora_weights.safetensors"
   }
-  Get-Item $ckpt, $lora | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB)}} | Format-Table -AutoSize
+  # SDXL base for the image_sdxl template (set FRAMEFORGE_IMAGE_WORKFLOW=image_sdxl in backend\.env).
+  $sdxl = "models\checkpoints\sd_xl_base_1.0.safetensors"
+  if (-not (Test-Path $sdxl)) {
+    Write-Host "Downloading Stable Diffusion XL base 1.0 (~6.9 GB)..."
+    curl.exe -L --fail --retry 5 -o $sdxl "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors"
+  }
+  Get-Item $ckpt, $lora, $sdxl | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB)}} | Format-Table -AutoSize
   Write-Host "ComfyUI GPU install complete. Start it with: scripts\run-comfyui-gpu.ps1"
 } finally {
   Pop-Location

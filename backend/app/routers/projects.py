@@ -96,13 +96,22 @@ def generate_tts(project_id: str, request: Request, session: Session = Depends(g
 
 
 @router.post("/{project_id}/refs", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def generate_refs(project_id: str, request: Request, force: bool = False,
+def generate_refs(project_id: str, request: Request, force: bool = False, workflow: str | None = None,
                   session: Session = Depends(get_session)) -> JobOut:
-    """Queue character + environment reference image generation via ComfyUI (Phase 5/6)."""
+    """Queue character + environment reference image generation via ComfyUI (Phase 5/6).
+
+    `workflow` overrides the configured image template (FRAMEFORGE_IMAGE_WORKFLOW) for this run."""
     project = _get_or_404(session, project_id)
     if project.plan is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "generate the plan first")
-    return _queue_stage(session, request, project, "refs.generate", {"force": force}, max_attempts=3)
+    payload: dict = {"force": force}
+    if workflow:
+        try:
+            get_registry().get(workflow)
+        except WorkflowError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+        payload["workflow"] = workflow
+    return _queue_stage(session, request, project, "refs.generate", payload, max_attempts=3)
 
 
 @router.post("/{project_id}/animate", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
@@ -179,15 +188,25 @@ def get_timeline(project_id: str, request: Request, session: Session = Depends(g
 
 
 @router.get("/{project_id}/files/{path:path}")
-def get_project_file(project_id: str, path: str, request: Request, session: Session = Depends(get_session)):
-    """Serve a generated file from the project's data folder (audio, images, renders)."""
+def get_project_file(project_id: str, path: str, request: Request, download: bool = False,
+                     session: Session = Depends(get_session)):
+    """Serve a generated file from the project's data folder (audio, images, renders).
+
+    `download=true` sends it as an attachment named after the project (the HTML `download`
+    attribute is ignored for cross-origin links, so the browser needs the header)."""
+    import re
+
     from fastapi.responses import FileResponse
 
-    _get_or_404(session, project_id)
+    project = _get_or_404(session, project_id)
     root = request.app.state.runner.project_dir(project_id).resolve()
     target = (root / path).resolve()
     if root not in target.parents or not target.is_file():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "file not found")
+    if download:
+        stem = re.sub(r"[^A-Za-z0-9]+", "-", project.title).strip("-")[:60] or project_id
+        name = f"{stem}{target.suffix}" if target.stem == "final" else f"{stem}-{target.name}"
+        return FileResponse(target, filename=name)
     return FileResponse(target)
 
 

@@ -254,6 +254,25 @@ export function fileUrl(projectId: string, rel: string): string {
   return `${API_URL}/api/projects/${projectId}/files/${rel}`;
 }
 
+// The backend reports file URLs as server-relative paths ("/api/projects/..."). Used directly in
+// <video src> or <a href> they would resolve against the frontend origin (:3000) and 404.
+function absolute(f: FileInfo | null): FileInfo | null {
+  return f && f.url.startsWith("/") ? { ...f, url: `${API_URL}${f.url}` } : f;
+}
+
+function absoluteRenderUrls(r: RenderInfo): RenderInfo {
+  return {
+    ...r,
+    dialogue: absolute(r.dialogue),
+    timeline: absolute(r.timeline),
+    music: absolute(r.music),
+    refs: r.refs.map((f) => absolute(f)!),
+    video_silent: absolute(r.video_silent),
+    subtitles: absolute(r.subtitles),
+    final: absolute(r.final),
+  };
+}
+
 // ---------- calls ----------
 
 export const api = {
@@ -279,7 +298,7 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(plan),
     }),
-  getRender: (id: string) => request<RenderInfo>(`/api/projects/${id}/render`),
+  getRender: (id: string) => request<RenderInfo>(`/api/projects/${id}/render`).then(absoluteRenderUrls),
   runStage: (id: string, stage: "plan" | "tts" | "refs" | "animate" | "assemble", query = "") =>
     request<Job>(`/api/projects/${id}/${stage}${query}`, { method: "POST" }),
   generateFull: (id: string, force = false) =>

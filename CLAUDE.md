@@ -51,7 +51,7 @@ powershell -ExecutionPolicy Bypass -File scripts\dev-frontend.ps1    # Next.js o
 powershell -ExecutionPolicy Bypass -File scripts\run-comfyui-cpu.ps1 # ComfyUI on :8188 (CPU mode)
 ```
 
-Backend tests (38): `cd backend; .\.venv\Scripts\python.exe -m pytest -q`. The render tests need
+Backend tests (40): `cd backend; .\.venv\Scripts\python.exe -m pytest -q`. The render tests need
 `backend/.venv-tts` (create with `scripts\install-workers.ps1`) and FFmpeg on PATH; they skip otherwise.
 
 ## Engines on a CPU-only machine (what the dev all-in-one uses)

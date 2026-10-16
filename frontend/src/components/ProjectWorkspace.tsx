@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import {
   api,
@@ -11,17 +11,18 @@ import {
   type Project,
   type RenderInfo,
 } from "@/lib/api";
+import type { UiMode } from "@/lib/useStored";
 import { Card, KV } from "./Card";
 import { StatusDot, type Tone } from "./StatusDot";
 
 type StageKey = "plan" | "tts" | "refs" | "animate" | "assemble";
 
-const STAGES: Array<{ key: StageKey; label: string; kind: string; help: string }> = [
-  { key: "plan", label: "Script", kind: "plan.generate", help: "Local LLM writes characters, scenes and dialogue" },
-  { key: "tts", label: "Voices", kind: "tts.generate", help: "Kokoro speaks every line; builds the dialogue timeline" },
-  { key: "refs", label: "References", kind: "refs.generate", help: "ComfyUI renders character and environment images" },
-  { key: "animate", label: "Animate", kind: "animate.render", help: "Shots, lip movement, blinks, camera moves" },
-  { key: "assemble", label: "Assemble", kind: "assemble.render", help: "Subtitles, music, final MP4 with checks" },
+const STAGES: Array<{ key: StageKey; label: string; kind: string; help: string; friendly: string }> = [
+  { key: "plan", label: "Script", kind: "plan.generate", help: "Local LLM writes characters, scenes and dialogue", friendly: "Writing the script" },
+  { key: "tts", label: "Voices", kind: "tts.generate", help: "Kokoro speaks every line; builds the dialogue timeline", friendly: "Recording the voices" },
+  { key: "refs", label: "References", kind: "refs.generate", help: "ComfyUI renders character and environment images", friendly: "Drawing the characters and the set" },
+  { key: "animate", label: "Animate", kind: "animate.render", help: "Shots, lip movement, blinks, camera moves", friendly: "Animating the scenes" },
+  { key: "assemble", label: "Assemble", kind: "assemble.render", help: "Subtitles, music, final MP4 with checks", friendly: "Adding subtitles and music" },
 ];
 
 const btn = "rounded-md border border-border bg-surface-2 px-3 py-1.5 text-xs hover:border-accent/60 disabled:opacity-40";
@@ -31,11 +32,11 @@ function fmtBytes(n: number) {
   return n > 1_000_000 ? `${(n / 1_000_000).toFixed(1)} MB` : `${Math.round(n / 1000)} KB`;
 }
 
-export function ProjectWorkspace({ project, jobs }: { project: Project; jobs: Job[] }) {
+export function ProjectWorkspace({ project, jobs, mode }: { project: Project; jobs: Job[]; mode: UiMode }) {
   const [plan, setPlan] = useState<ProductionPlan | null>(null);
   const [summary, setSummary] = useState<PlanSummary | null>(null);
   const [render, setRender] = useState<RenderInfo | null>(null);
-  const [advanced, setAdvanced] = useState(false);
+  const advanced = mode === "advanced";
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -133,17 +134,116 @@ export function ProjectWorkspace({ project, jobs }: { project: Project; jobs: Jo
 
   const names = Object.fromEntries((plan?.characters ?? []).map((c) => [c.id, c.name]));
 
+  // ----- simple mode -----
+  const collapsible = (node: ReactNode) =>
+    advanced ? node : (
+      <details className="group rounded-xl border border-border bg-surface">
+        <summary className="cursor-pointer select-none px-4 py-3 text-sm text-muted hover:text-foreground">
+          <span className="group-open:hidden">Show the script and characters</span>
+          <span className="hidden group-open:inline">Hide the script and characters</span>
+        </summary>
+        <div className="[&>section]:rounded-none [&>section]:border-0 [&>section]:border-t">{node}</div>
+      </details>
+    );
+
+  const failedStage =
+    STAGES.find((s) => stageJob(s.key).failed) ??
+    (pipelineJob?.status === "failed" ? { key: "assemble" as StageKey, friendly: "Making the video" } : undefined);
+  const failedText = failedStage ? stageJob(failedStage.key).failed ?? pipelineJob?.error ?? null : null;
+  const working = Boolean(activeJob);
+  const overall = pipelineActive && pipelineJob ? pipelineJob.progress : activeJob?.progress ?? 0;
+  const remake = () => {
+    if (confirm("Make a new version from scratch? This writes a new script and remakes the voices, pictures and video.")) {
+      void run(() => api.generateFull(project.id, true));
+    }
+  };
+
+  const simpleProduction = (
+    <Card
+      title={project.title}
+      right={
+        render?.final && !working ? (
+          <button onClick={remake} className={btn}>Make a new version</button>
+        ) : undefined
+      }
+    >
+      {error && <p className="text-sm text-bad break-words">{error}</p>}
+      {render === null && !working && !error && <p className="text-sm text-muted">Loading…</p>}
+      {render !== null && !working && !render.final && !failedStage && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted">This video hasn’t been made yet.</p>
+          <button
+            onClick={() => void run(() => api.generateFull(project.id))}
+            className="rounded-md bg-accent px-5 py-2.5 text-sm font-semibold text-black hover:brightness-110"
+          >
+            Make my video
+          </button>
+        </div>
+      )}
+      {!working && failedStage && (
+        <div className="flex flex-col gap-2 rounded-md border border-bad/40 bg-bad/5 p-3">
+          <p className="text-sm">
+            Something went wrong while <span className="font-medium">{failedStage.friendly.toLowerCase()}</span>.
+            Finished steps are kept, so trying again continues where it stopped.
+          </p>
+          {failedText && <p className="text-xs text-muted break-words line-clamp-3">Details: {failedText}</p>}
+          <div>
+            <button
+              onClick={() => void run(() => api.generateFull(project.id))}
+              className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-black hover:brightness-110"
+            >
+              Try again
+            </button>
+          </div>
+        </div>
+      )}
+      {!working && render?.final && !failedStage && (
+        <p className="text-sm text-ok">Your video is ready. Watch or download it below.</p>
+      )}
+      {working && (
+        <>
+          {working && (
+            <div className="flex flex-col gap-1">
+              <div className="flex items-baseline justify-between text-sm">
+                <span className="font-medium">Making your video…</span>
+                <span className="text-xs text-muted">{Math.round(overall * 100)}%</span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded bg-surface-2">
+                <div className="h-full bg-accent transition-[width] duration-500" style={{ width: `${Math.round(overall * 100)}%` }} />
+              </div>
+              <p className="text-xs text-muted">You can leave this page open or come back later; the work continues in the background.</p>
+            </div>
+          )}
+          <ol className="flex flex-col gap-1.5">
+            {STAGES.map((s) => {
+              const st = stageJob(s.key);
+              const tone = stageTone(s.key);
+              const state = st.running ? "running" : tone === "ok" ? "done" : "pending";
+              return (
+                <li key={s.key} className="flex items-center gap-2 text-sm">
+                  <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] ${
+                    state === "done" ? "bg-ok/20 text-ok" : state === "running" ? "bg-accent/20 text-accent" : "bg-surface-2 text-muted"
+                  }`}>
+                    {state === "done" ? "✓" : state === "running" ? <span className="h-2 w-2 animate-pulse rounded-full bg-accent" /> : ""}
+                  </span>
+                  <span className={state === "pending" ? "text-muted" : ""}>{s.friendly}</span>
+                  {state === "running" && st.progress > 0 && (
+                    <span className="text-xs text-muted">{Math.round(Math.min(1, st.progress) * 100)}%</span>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        </>
+      )}
+    </Card>
+  );
+
   return (
     <div className="flex flex-col gap-4">
-      <Card
-        title={`Production · ${project.title}`}
-        right={
-          <label className="flex items-center gap-2 text-xs text-muted">
-            <input type="checkbox" checked={advanced} onChange={(e) => setAdvanced(e.target.checked)} className="accent-accent" />
-            advanced mode
-          </label>
-        }
-      >
+      {!advanced && simpleProduction}
+      {advanced && (
+      <Card title={`Production · ${project.title}`}>
         {error && <p className="text-sm text-bad break-words">{error}</p>}
         <div className="flex flex-wrap items-center gap-3">
           <button
@@ -201,20 +301,32 @@ export function ProjectWorkspace({ project, jobs }: { project: Project; jobs: Jo
           })}
         </ol>
       </Card>
+      )}
 
       {render?.final && (
-        <Card title="Final video" right={<a href={render.final.url} download className="text-xs text-accent hover:underline">download MP4 · {fmtBytes(render.final.size)}</a>}>
+        <Card
+          title={advanced ? "Final video" : "Your video"}
+          right={
+            advanced ? (
+              <a href={`${render.final.url}?download=true`} className="text-xs text-accent hover:underline">download MP4 · {fmtBytes(render.final.size)}</a>
+            ) : (
+              <a href={`${render.final.url}?download=true`} className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-black hover:brightness-110">
+                Download video ({fmtBytes(render.final.size)})
+              </a>
+            )
+          }
+        >
           <video key={render.final.size} src={render.final.url} controls className="w-full rounded-md border border-border bg-black" preload="metadata" />
-          <div className="flex flex-wrap gap-4 text-xs text-muted">
-            {render.subtitles && <a href={render.subtitles.url} download className="hover:text-foreground">subtitles.srt</a>}
-            {render.dialogue && <a href={render.dialogue.url} download className="hover:text-foreground">dialogue.wav</a>}
-            {render.music && <a href={render.music.url} download className="hover:text-foreground">music.wav</a>}
-            {render.video_silent && <a href={render.video_silent.url} download className="hover:text-foreground">picture track (silent)</a>}
-          </div>
+          {advanced && <div className="flex flex-wrap gap-4 text-xs text-muted">
+            {render.subtitles && <a href={`${render.subtitles.url}?download=true`} className="hover:text-foreground">subtitles.srt</a>}
+            {render.dialogue && <a href={`${render.dialogue.url}?download=true`} className="hover:text-foreground">dialogue.wav</a>}
+            {render.music && <a href={`${render.music.url}?download=true`} className="hover:text-foreground">music.wav</a>}
+            {render.video_silent && <a href={`${render.video_silent.url}?download=true`} className="hover:text-foreground">picture track (silent)</a>}
+          </div>}
         </Card>
       )}
 
-      {plan && summary && (
+      {plan && summary && collapsible(
         <Card
           title={`Script · ${plan.title}`}
           right={
@@ -303,7 +415,7 @@ export function ProjectWorkspace({ project, jobs }: { project: Project; jobs: Jo
         </Card>
       )}
 
-      {!plan && (
+      {!plan && advanced && (
         <Card title="Script">
           <p className="text-sm text-muted">No script yet. Press “Generate complete video”, or in advanced mode run the Script stage alone.</p>
           <KV k="Prompt" v={project.prompt} />
