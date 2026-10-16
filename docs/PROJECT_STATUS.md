@@ -77,12 +77,14 @@ Outstanding:
 
 Clone the repo, follow README "Continue on another computer", start the three servers, then:
 
-1. **Verify the first full live render.** On the dev machine the one-click pipeline completed
-   script → voices → references live; animate failed once because the backend process had a stale
-   PATH without FFmpeg (fixed: `Settings.resolved_ffmpeg` finds the winget install). A re-run was
-   started at the end of the last session; the result was not yet reviewed. Create a project
-   (60 s, two cats), press "Generate complete video", and watch `render/final.mp4` in the workspace.
-   Judge: mouth movement follows speech, cuts between speakers, subtitles readable, music under dialogue.
+1. **Review the first full live render.** On the dev machine the one-click pipeline completed
+   end to end on 2026-10-16: script (qwen3:4b) → voices (Kokoro) → references (ComfyUI CPU) →
+   animate (1266 frames, 17 shots, 960x540) → assemble. `render/final.mp4` is 52.75 s with
+   8 subtitle cues and music; all QC checks passed. The video was only spot-checked on one frame,
+   not watched. Open the project in the dashboard and watch it. Judge: mouth movement follows
+   speech, cuts between speakers, subtitles readable, music under dialogue. (Animate failed once
+   before that because the backend process had a stale PATH without FFmpeg; fixed via
+   `Settings.resolved_ffmpeg`.)
 2. **Known rough edges to tune after watching:** mouth/jaw placement when the face box is wrong
    (the animator logs `face box` per character on stderr), character scale/position in two-shots,
    listener reaction timing, music volume (`plan.music.volume_db`).
