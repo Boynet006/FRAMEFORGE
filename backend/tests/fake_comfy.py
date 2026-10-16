@@ -1,7 +1,7 @@
 """A small stand-in for ComfyUI's HTTP/WebSocket API, used only by the test-suite.
 
 It reproduces the request/response *shapes* of the real server (POST /prompt,
-GET /history/{id}, /view, /interrupt, /queue, /free, /system_stats, WS /ws)
+GET /history/{id}, /view, /interrupt, /queue, /free, /system_stats, POST /upload/image, WS /ws)
 so the client and job runner can be exercised without a GPU. It is never used
 by the application itself.
 
@@ -14,6 +14,7 @@ Behaviour hooks for tests (via node inputs in the submitted graph):
 from __future__ import annotations
 
 import asyncio
+import re
 import socket
 import threading
 import time
@@ -57,6 +58,8 @@ class FakeComfy:
         self.clients: set[WebSocket] = set()
         self.submitted: list[dict[str, Any]] = []
         self.free_calls = 0
+        self.uploads: dict[str, int] = {}          # filename -> size, from POST /upload/image
+        self.video_bytes: bytes | None = None       # set to a real MP4 so SaveVideo outputs can be decoded
         self._routes()
 
     # ---------- helpers ----------
@@ -108,7 +111,7 @@ class FakeComfy:
                 outputs[nid] = {"images": [{"filename": fn, "subfolder": "", "type": "output"}]}
             elif ct == "SaveVideo":
                 fn = f"{prompt_id[:8]}_00001_.mp4"
-                (self.output_dir / fn).write_bytes(b"FAKE_MP4" * 64)
+                (self.output_dir / fn).write_bytes(self.video_bytes or b"FAKE_MP4" * 64)
                 outputs[nid] = {"images": [{"filename": fn, "subfolder": "", "type": "output"}], "animated": [True]}
             if nid in outputs:
                 await self._broadcast({"type": "executed", "data": {"node": nid, "output": outputs[nid], "prompt_id": prompt_id}})
@@ -145,6 +148,17 @@ class FakeComfy:
             self.pending.append(pid)
             asyncio.create_task(self._run(pid))
             return JSONResponse({"prompt_id": pid, "number": len(self.history), "node_errors": {}})
+
+        @app.post("/upload/image")
+        async def upload(req: Request) -> dict[str, Any]:
+            # multipart parsed by hand (no python-multipart in the backend venv): only the name matters here
+            body = await req.body()
+            m = re.search(rb'name="image"; filename="([^"]+)"', body)
+            if not m:
+                return JSONResponse({"error": "no image field"}, status_code=400)
+            name = m.group(1).decode()
+            self.uploads[name] = len(body)
+            return {"name": name, "subfolder": "", "type": "input"}
 
         @app.get("/history/{pid}")
         async def history(pid: str) -> dict[str, Any]:

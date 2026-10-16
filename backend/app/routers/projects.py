@@ -115,13 +115,20 @@ def generate_refs(project_id: str, request: Request, force: bool = False, workfl
 
 
 @router.post("/{project_id}/animate", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def animate(project_id: str, request: Request, max_seconds: float = 0,
+def animate(project_id: str, request: Request, max_seconds: float = 0, render_mode: str | None = None,
             session: Session = Depends(get_session)) -> JobOut:
-    """Render the silent picture track from the plan, references and dialogue timeline."""
+    """Render the silent picture track from the plan, references and dialogue timeline.
+
+    `render_mode` (cpu | gpu) overrides FRAMEFORGE_RENDER_MODE for this run."""
     project = _get_or_404(session, project_id)
     if project.plan is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "generate the plan first")
-    return _queue_stage(session, request, project, "animate.render", {"max_seconds": max_seconds})
+    if render_mode not in (None, "cpu", "gpu"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "render_mode must be cpu or gpu")
+    payload: dict = {"max_seconds": max_seconds}
+    if render_mode:
+        payload["render_mode"] = render_mode
+    return _queue_stage(session, request, project, "animate.render", payload)
 
 
 @router.post("/{project_id}/assemble", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)

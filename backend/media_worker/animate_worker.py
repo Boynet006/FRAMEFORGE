@@ -5,11 +5,14 @@ This is the "animatic" render mode for machines without a GPU: characters are
 cut out of their reference portraits and placed in their environment; the
 speaking character's mouth is driven by the real dialogue audio envelope;
 blinks, head motion, listener reactions, shot/reverse-shot cutting and camera
-moves are procedural. On a GPU machine the same shot list drives audio-driven
-video models instead (Phase 5/6 GPU path).
+moves are procedural. In GPU render mode (app/services/engines/animate_gpu_engine.py)
+the same shot list drives Wan 2.2 S2V: --stills renders each speaking shot's first frame
+as the model's reference, and --clips splices the generated lip-synced clips back in.
 
     python animate_worker.py --project <dir> --out render/video_silent.mp4 --shots render/shots.json
                              [--width 1280 --height 720 --fps 24 --ffmpeg ffmpeg]
+                             [--no-two-shots] [--stills speaking|id,id --stills-dir render/s2v]
+                             [--clips render/s2v/clips.json]
 
 stdout: "PROGRESS <frame> <total>" lines.
 """
@@ -23,6 +26,7 @@ import random
 import subprocess
 import sys
 import wave
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -66,7 +70,9 @@ class CharacterAsset:
 # ----------------------------------------------------------------------------- shot planning
 
 
-def plan_shots(plan: dict[str, Any], timeline: dict[str, Any]) -> list[Shot]:
+def plan_shots(plan: dict[str, Any], timeline: dict[str, Any], two_shots: bool = True) -> list[Shot]:
+    """Shot list from the dialogue timeline. `two_shots=False` (GPU mode) frames every spoken line on its
+    speaker alone, because the audio-driven video model animates one face per shot."""
     chars = [c["id"] for c in plan["characters"]]
     shots: list[Shot] = []
     lines = timeline["lines"]
@@ -81,7 +87,7 @@ def plan_shots(plan: dict[str, Any], timeline: dict[str, Any]) -> list[Shot]:
             nxt = s_lines[i + 1]["start_s"] if i + 1 < len(s_lines) else scene["end_s"]
             speaker = line["character_id"]
             listener = next((c for c in chars if c != speaker), None)
-            framing = "two" if (i % 4 == 3 and listener) else ("close" if i % 2 == 0 else "medium")
+            framing = "two" if (i % 4 == 3 and listener and two_shots) else ("close" if i % 2 == 0 else "medium")
             dur = nxt - line["start_s"]
             # long line: cut to the listener for a reaction in the middle, then back
             if dur > 5.0 and listener and framing != "two":
@@ -248,6 +254,32 @@ class Envelope:
         return float(env[i])
 
 
+class ClosedMouth:
+    """Envelope stand-in for reference stills: mouth shut whatever the audio does."""
+
+    def at(self, line_id: str | None, t: float) -> float:  # noqa: ARG002
+        return 0.0
+
+
+class ClipFrames:
+    """Frames of a pre-rendered shot clip (GPU speaking shots), decoded by FFmpeg at the output size and
+    frame rate. Frame 0 is the shot's first frame; past the end the last frame is held."""
+
+    def __init__(self, path: Path, size: tuple[int, int], fps: int, ffmpeg: str) -> None:
+        w, h = size
+        vf = f"scale={w}:{h}:flags=lanczos:force_original_aspect_ratio=increase,crop={w}:{h},fps={fps}"
+        raw = subprocess.run([ffmpeg, "-loglevel", "error", "-i", str(path), "-vf", vf, "-an",
+                              "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True, check=True).stdout
+        n = len(raw) // (w * h * 3)
+        if n == 0:
+            raise RuntimeError(f"clip {path.name} has no frames")
+        self.frames = np.frombuffer(raw[: n * w * h * 3], dtype=np.uint8).reshape(n, h, w, 3)
+        self.size = size
+
+    def at(self, i: int) -> Image.Image:
+        return Image.fromarray(self.frames[min(max(i, 0), len(self.frames) - 1)])
+
+
 # ----------------------------------------------------------------------------- character rendering
 
 
@@ -305,6 +337,11 @@ def render_character(asset: CharacterAsset, t: float, mouth: float, speaking: bo
 # ----------------------------------------------------------------------------- frame composition
 
 
+# Character height in medium shots, as a share of frame height. GPU mode (--no-two-shots) frames tighter
+# so the audio-driven video model has enough mouth pixels to animate.
+MEDIUM_SCALE = 0.88
+
+
 def _place(frame: Image.Image, char: Image.Image, height_frac: float, cx_frac: float, mirror: bool) -> None:
     h = int(frame.height * height_frac)
     scale = h / char.height
@@ -326,7 +363,9 @@ def compose(shot: Shot, t: float, envs: dict[str, Image.Image], chars: dict[str,
     # Ken Burns: zoom 1.0 -> 1.06, drift sideways
     zoom = 1.0 + 0.06 * u
     vw, vh = int(W / zoom * 1.0), int(H / zoom * 1.0)
-    drift = (0.5 + (0.08 * (u - 0.5)) * (1 if hash(shot.id) % 2 else -1))
+    # zlib.crc32, not hash(): str hashes are randomised per process, and reference stills must be
+    # identical between runs so cached GPU clips stay valid
+    drift = (0.5 + (0.08 * (u - 0.5)) * (1 if zlib.crc32(shot.id.encode()) % 2 else -1))
     x0 = int((bg_full.width - vw) * drift)
     y0 = int((bg_full.height - vh) * 0.5)
     bg = bg_full.crop((x0, y0, x0 + vw, y0 + vh)).resize((W, H), Image.BILINEAR)
@@ -352,7 +391,7 @@ def compose(shot: Shot, t: float, envs: dict[str, Image.Image], chars: dict[str,
         speaking = shot.kind == "speaking"
         img = render_character(a, t, envelope.at(shot.line_id, t) if speaking else 0.0, speaking, rng, blinks[cid])
         side = order.index(cid) if cid in order else 0
-        _place(frame, img, 1.15 if shot.framing == "close" else 0.88, 0.42 if side == 0 else 0.58, mirror=(side == 1))
+        _place(frame, img, 1.15 if shot.framing == "close" else MEDIUM_SCALE, 0.42 if side == 0 else 0.58, mirror=(side == 1))
     # subtle vignette
     return frame.convert("RGB")
 
@@ -379,6 +418,12 @@ def main() -> int:
     ap.add_argument("--fps", type=int, default=24)
     ap.add_argument("--ffmpeg", default="ffmpeg")
     ap.add_argument("--max-seconds", type=float, default=0, help="debug: render only the first N seconds")
+    ap.add_argument("--no-two-shots", action="store_true", help="GPU mode: speak every line in a single-character shot")
+    ap.add_argument("--stills", default="", help="render only the first frame (mouth closed) of these shots: "
+                                                  "comma-separated ids or 'speaking'; then exit")
+    ap.add_argument("--stills-dir", default="render/s2v", help="where --stills writes <shot_id>.png")
+    ap.add_argument("--clips", default="", help="JSON {shot_id: clip path relative to project}: use these "
+                                                 "pre-rendered clips (GPU speaking shots) instead of drawing the shot")
     args = ap.parse_args()
 
     project = Path(args.project)
@@ -386,19 +431,40 @@ def main() -> int:
     timeline = json.loads((project / "audio" / "dialogue.json").read_text(encoding="utf-8"))
     size = (args.width - args.width % 2, args.height - args.height % 2)
 
-    shots = plan_shots(plan, timeline)
+    global MEDIUM_SCALE
+    if args.no_two_shots:
+        MEDIUM_SCALE = 1.0
+    shots = plan_shots(plan, timeline, two_shots=not args.no_two_shots)
     out_path = project / args.out
     out_path.parent.mkdir(parents=True, exist_ok=True)
     (project / args.shots).write_text(json.dumps([s.to_json() for s in shots], indent=1), encoding="utf-8")
 
     chars = load_characters(plan, project)
     envs = load_environments(plan, project, size)
-    envelope = Envelope(project, timeline, args.fps)
     order = [c["id"] for c in plan["characters"]]
+
+    if args.stills:
+        wanted = {s.id for s in shots if s.kind == "speaking"} if args.stills == "speaking" else set(args.stills.split(","))
+        out_dir = project / args.stills_dir
+        out_dir.mkdir(parents=True, exist_ok=True)
+        no_blinks = {cid: [] for cid in chars}
+        written = []
+        for shot in shots:
+            if shot.id in wanted:
+                frame = compose(shot, shot.start_s, envs, chars, ClosedMouth(), size, no_blinks, random.Random(42), order)
+                frame.save(out_dir / f"{shot.id}.png")
+                written.append(shot.id)
+        print(json.dumps({"stills": written, "dir": args.stills_dir, "size": size}))
+        return 0
+
+    clips: dict[str, str] = json.loads((project / args.clips).read_text(encoding="utf-8")) if args.clips else {}
+    envelope = Envelope(project, timeline, args.fps)
     rng = random.Random(42)
     duration = timeline["duration_s"] if not args.max_seconds else min(timeline["duration_s"], args.max_seconds)
     blinks = {cid: _blink_schedule(random.Random(a.seed), duration + 1) for cid, a in chars.items()}
     total = int(duration * args.fps)
+    clip_cache: tuple[str, ClipFrames] | None = None
+    used_clips: set[str] = set()
 
     cmd = [args.ffmpeg, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
            "-s", f"{size[0]}x{size[1]}", "-r", str(args.fps), "-i", "-",
@@ -411,7 +477,14 @@ def main() -> int:
             t = f / args.fps
             while si + 1 < len(shots) and t >= shots[si + 1].start_s:
                 si += 1
-            frame = compose(shots[si], t, envs, chars, envelope, size, blinks, rng, order)
+            shot = shots[si]
+            if shot.id in clips:
+                if clip_cache is None or clip_cache[0] != shot.id:
+                    clip_cache = (shot.id, ClipFrames(project / clips[shot.id], size, args.fps, args.ffmpeg))
+                frame = clip_cache[1].at(int(round((t - shot.start_s) * args.fps)))
+                used_clips.add(shot.id)
+            else:
+                frame = compose(shot, t, envs, chars, envelope, size, blinks, rng, order)
             proc.stdin.write(frame.tobytes())
             if f % args.fps == 0:
                 print(f"PROGRESS {f} {total}", flush=True)
@@ -422,7 +495,8 @@ def main() -> int:
         print(f"ffmpeg exited with {rc}", file=sys.stderr)
         return 1
     print(f"PROGRESS {total} {total}", flush=True)
-    print(json.dumps({"frames": total, "fps": args.fps, "size": size, "shots": len(shots), "duration_s": duration}))
+    print(json.dumps({"frames": total, "fps": args.fps, "size": size, "shots": len(shots), "duration_s": duration,
+                      "clip_shots": len(used_clips)}))
     return 0
 
 

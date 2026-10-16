@@ -9,6 +9,7 @@ Endpoints used (all native ComfyUI, no custom nodes required):
   POST /interrupt              stop the currently executing prompt
   POST /queue {"delete":[id]}  remove a pending prompt
   POST /free                   unload models / free VRAM
+  POST /upload/image           put an input file (image or audio) into ComfyUI's input folder
   WS   /ws?clientId=..         live progress messages
 """
 
@@ -171,6 +172,18 @@ class ComfyClient:
 
     async def free(self, unload_models: bool = True, free_memory: bool = True) -> None:
         await self._request("POST", "/free", json={"unload_models": unload_models, "free_memory": free_memory})
+
+    async def upload(self, data: bytes, filename: str) -> str:
+        """Put a file into ComfyUI's input folder (images, and audio for LoadAudio) and return the
+        name LoadImage/LoadAudio expect. ComfyUI's endpoint is called /upload/image whatever the type."""
+        r = await self._request("POST", "/upload/image", timeout=120,
+                                files={"image": (filename, data, "application/octet-stream")},
+                                data={"overwrite": "true", "type": "input"})
+        if r.status_code >= 400:
+            raise ComfyError(f"upload {filename} -> HTTP {r.status_code}: {r.text[:300]}")
+        body = r.json()
+        sub = body.get("subfolder") or ""
+        return f"{sub}/{body['name']}" if sub else str(body["name"])
 
     async def download(self, out: OutputFile) -> bytes:
         r = await self._request("GET", "/view", params=out.view_params, timeout=600)

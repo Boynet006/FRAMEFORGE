@@ -12,8 +12,9 @@ try {
   $py = ".\.venv-tts\Scripts\python.exe"
   & $py -m pip install --upgrade pip
   & $py -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-  & $py -m pip install "kokoro>=0.9.4" soundfile pillow opencv-python-headless numpy "rembg[cpu]"
-  & $py -c "import kokoro, torch, cv2, rembg, PIL; print('kokoro', kokoro.__version__, 'torch', torch.__version__, 'cv2', cv2.__version__, 'pillow', PIL.__version__, 'rembg ok')"
+  # OpenCV 5 dropped the Haar cascade face detector the animator uses (cv2.CascadeClassifier); keep 4.x.
+  & $py -m pip install "kokoro>=0.9.4" soundfile pillow "opencv-python-headless>=4.10,<5" numpy "rembg[cpu]"
+  & $py -c "import kokoro, torch, cv2, rembg, PIL; assert hasattr(cv2, 'CascadeClassifier'), 'OpenCV without CascadeClassifier'; print('kokoro', kokoro.__version__, 'torch', torch.__version__, 'cv2', cv2.__version__, 'pillow', PIL.__version__, 'rembg ok')"
   Write-Host "Worker environment ready at backend\.venv-tts"
 } finally {
   Pop-Location

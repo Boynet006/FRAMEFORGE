@@ -51,7 +51,7 @@ powershell -ExecutionPolicy Bypass -File scripts\dev-frontend.ps1    # Next.js o
 powershell -ExecutionPolicy Bypass -File scripts\run-comfyui-cpu.ps1 # ComfyUI on :8188 (CPU mode)
 ```
 
-Backend tests (40): `cd backend; .\.venv\Scripts\python.exe -m pytest -q`. The render tests need
+Backend tests (44): `cd backend; .\.venv\Scripts\python.exe -m pytest -q`. The render tests need
 `backend/.venv-tts` (create with `scripts\install-workers.ps1`) and FFmpeg on PATH; they skip otherwise.
 
 ## Engines on a CPU-only machine (what the dev all-in-one uses)
@@ -64,8 +64,17 @@ Backend tests (40): `cd backend; .\.venv\Scripts\python.exe -m pytest -q`. The r
   cannot run on an iGPU with 15 GB RAM.
 - FFmpeg 9 for assembly.
 
-On the RTX 5080 PC the same pipeline is meant to swap the animate stage for ComfyUI video models
-(Wan 2.2 S2V / 14B) — see the environment report. That path is designed but not built yet.
+## GPU machines (RTX 4090 laptop now, RTX 5080 later)
+
+`backend/.env`: `FRAMEFORGE_OLLAMA_MODEL=qwen3:14b`, `FRAMEFORGE_IMAGE_WORKFLOW=image_sdxl`,
+`FRAMEFORGE_RENDER_MODE=gpu`. ComfyUI with CUDA: `scripts\install-comfyui-gpu.ps1 -S2V`, run with
+`scripts\run-comfyui-gpu.ps1` (launch config `comfyui-gpu`).
+
+GPU render mode (`app/services/engines/animate_gpu_engine.py`): the animator plans shots with every
+spoken line on its speaker alone (`--no-two-shots`), renders each speaking shot's first frame with the
+mouth closed (`--stills`), then Wan 2.2 S2V (`workflows/video_wan22_s2v.v1.json`, extension chunks
+added in code) turns still + line audio into a lip-synced clip, checkpointed in `render/s2v/`. The
+animator splices the clips in (`--clips`) and draws establishing/reaction shots procedurally.
 
 ## Conventions
 

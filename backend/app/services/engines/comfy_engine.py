@@ -50,9 +50,13 @@ class ComfyEngine:
         progress: ProgressCb,
         persist_payload: PersistCb,
         cancel_requested: Callable[[], bool],
+        graph_hook: Callable[[dict[str, Any], Any, dict[str, Any]], dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         template = self.registry.get(payload["workflow"], payload.get("version"))
         graph, resolved = template.build(payload.get("params") or {})
+        if graph_hook is not None:
+            # engines that need a variable-size graph (e.g. S2V extension chunks) expand the template here
+            graph = graph_hook(graph, template, resolved)
         client_id = f"frameforge-{job_id}"
         t0 = time.perf_counter()
 

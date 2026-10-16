@@ -25,6 +25,7 @@ from ..schemas import JobOut
 from .comfy_client import ComfyClient, ComfyError, ComfyUnavailable
 from .engines.comfy_engine import ComfyEngine, JobCancelled
 from .engines.animate_engine import AnimateEngine, AnimateError
+from .engines.animate_gpu_engine import GpuAnimateEngine
 from .engines.assemble_engine import AssembleEngine, AssembleError
 from .engines.pipeline_engine import PipelineEngine
 from .engines.plan_engine import PlanEngine
@@ -321,9 +322,16 @@ class JobRunner:
             with SessionLocal() as s:
                 project = s.get(Project, out.project_id)
                 quality = str((project.settings if project else {}).get("quality") or "draft")
+            max_seconds = float(payload.get("max_seconds") or 0)
+            mode = str(payload.get("render_mode") or self.settings.render_mode)
+            if mode == "gpu":
+                gpu = GpuAnimateEngine(self.settings.resolved_tts_python, self.settings.resolved_ffmpeg,
+                                       self._comfy_engine())
+                return await gpu.run(plan, project_dir, quality, job_id, progress=progress,
+                                     cancel_requested=lambda: job_id in self._cancel_requested,
+                                     max_seconds=max_seconds)
             engine = AnimateEngine(self.settings.resolved_tts_python, self.settings.resolved_ffmpeg)
-            return await engine.run(plan, project_dir, quality, progress=progress,
-                                    max_seconds=float(payload.get("max_seconds") or 0))
+            return await engine.run(plan, project_dir, quality, progress=progress, max_seconds=max_seconds)
         if stage == "assemble":
             engine = AssembleEngine(self.settings.resolved_tts_python, self.settings.resolved_ffmpeg,
                                     self.settings.resolved_ffprobe)

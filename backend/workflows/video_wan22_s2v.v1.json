@@ -1,0 +1,71 @@
+{
+  "name": "video_wan22_s2v",
+  "version": 1,
+  "engine": "comfyui",
+  "description": "Wan 2.2 S2V 14B (fp8): speech-to-video from one reference frame + a dialogue WAV. Generates real mouth, jaw and head motion that follows the audio; used for speaking shots in GPU render mode. One chunk = 77 frames at 16 fps (~4.8 s); the GPU animate engine appends WanSoundImageToVideoExtend chunks (see hints.extend) for longer shots. Based on ComfyUI's video_wan2_2_14B_s2v template, including its first-frame VAE fix (duplicate the first latent frame, drop the first 4 decoded frames). lora_strength 1 + 4 steps + CFG 1 uses the lightx2v Lightning LoRA (fast, less motion); lora_strength 0 + 20 steps + CFG 6 is the full-quality setting. Validated on ComfyUI 0.41 + RTX 4090 Laptop (torch 2.14 cu130): 77 frames at 848x480 in ~95-110 s (4 steps) or ~900 s (20 steps); 1024x576 4 steps ~180 s; peak ~14.5 GB VRAM.",
+  "output_kind": "video",
+  "validated": true,
+  "requires": {
+    "models": [
+      "diffusion_models/wan2.2_s2v_14B_fp8_scaled.safetensors",
+      "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "audio_encoders/wav2vec2_large_english_fp16.safetensors",
+      "vae/wan_2.1_vae.safetensors",
+      "loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors"
+    ],
+    "inputs": "reference image and audio are uploaded to ComfyUI's input folder (POST /upload/image)",
+    "license": "Apache 2.0"
+  },
+  "hints": {
+    "fps": 16,
+    "chunk_frames": 77,
+    "extend": {
+      "length_node": "93",
+      "sampler_node": "3",
+      "latent_source": ["3", 0],
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "vae": ["39", 0],
+      "audio_encoder_output": ["56", 0],
+      "ref_image": ["52", 0],
+      "model": ["54", 0]
+    }
+  },
+  "inputs": {
+    "prompt":          {"node": "6",   "field": "text",          "type": "string",  "default": "The character talks to someone off camera, natural lip movement, subtle head motion.", "label": "Prompt"},
+    "negative_prompt": {"node": "7",   "field": "text",          "type": "string",  "default": "static, frozen, blurry, distorted face, deformed mouth, extra limbs, text, subtitles, watermark, low quality, flicker", "label": "Negative prompt"},
+    "image":           {"node": "52",  "field": "image",         "type": "string",  "default": "", "label": "Reference image (ComfyUI input file)"},
+    "audio":           {"node": "58",  "field": "audio",         "type": "string",  "default": "", "label": "Audio (ComfyUI input file)"},
+    "width":           {"node": "93",  "field": "width",         "type": "integer", "default": 848, "min": 256, "max": 1280, "step": 16, "label": "Width"},
+    "height":          {"node": "93",  "field": "height",        "type": "integer", "default": 480, "min": 256, "max": 1280, "step": 16, "label": "Height"},
+    "length":          {"node": "93",  "field": "length",        "type": "integer", "default": 77, "min": 73, "max": 121, "label": "Chunk length (frames)"},
+    "steps":           {"node": "3",   "field": "steps",         "type": "integer", "default": 4, "min": 1, "max": 40, "label": "Steps"},
+    "cfg":             {"node": "3",   "field": "cfg",           "type": "number",  "default": 1.0, "min": 1, "max": 10, "label": "CFG"},
+    "seed":            {"node": "3",   "field": "seed",          "type": "integer", "default": -1, "label": "Seed (-1 = random)"},
+    "lora_strength":   {"node": "107", "field": "strength_model","type": "number",  "default": 1.0, "min": 0, "max": 1.5, "label": "Lightning LoRA strength (0 = off)"},
+    "shift":           {"node": "54",  "field": "shift",         "type": "number",  "default": 8.0, "min": 1, "max": 20, "label": "Sampling shift"},
+    "fps":             {"node": "82",  "field": "fps",           "type": "number",  "default": 16, "min": 8, "max": 30, "label": "Output fps"}
+  },
+  "outputs": [{"node": "113", "kind": "video"}],
+  "graph": {
+    "37":  {"class_type": "UNETLoader", "inputs": {"unet_name": "wan2.2_s2v_14B_fp8_scaled.safetensors", "weight_dtype": "default"}},
+    "107": {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["37", 0], "lora_name": "wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors", "strength_model": 1.0}},
+    "54":  {"class_type": "ModelSamplingSD3", "inputs": {"model": ["107", 0], "shift": 8.0}},
+    "38":  {"class_type": "CLIPLoader", "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"}},
+    "6":   {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["38", 0]}},
+    "7":   {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["38", 0]}},
+    "39":  {"class_type": "VAELoader", "inputs": {"vae_name": "wan_2.1_vae.safetensors"}},
+    "57":  {"class_type": "AudioEncoderLoader", "inputs": {"audio_encoder_name": "wav2vec2_large_english_fp16.safetensors"}},
+    "58":  {"class_type": "LoadAudio", "inputs": {"audio": ""}},
+    "56":  {"class_type": "AudioEncoderEncode", "inputs": {"audio_encoder": ["57", 0], "audio": ["58", 0]}},
+    "52":  {"class_type": "LoadImage", "inputs": {"image": ""}},
+    "93":  {"class_type": "WanSoundImageToVideo", "inputs": {"positive": ["6", 0], "negative": ["7", 0], "vae": ["39", 0], "audio_encoder_output": ["56", 0], "ref_image": ["52", 0], "width": 848, "height": 480, "length": 77, "batch_size": 1}},
+    "3":   {"class_type": "KSampler", "inputs": {"model": ["54", 0], "positive": ["93", 0], "negative": ["93", 1], "latent_image": ["93", 2], "seed": 0, "steps": 4, "cfg": 1.0, "sampler_name": "uni_pc", "scheduler": "simple", "denoise": 1.0}},
+    "94":  {"class_type": "LatentCut", "inputs": {"samples": ["3", 0], "dim": "t", "index": 0, "amount": 1}},
+    "95":  {"class_type": "LatentConcat", "inputs": {"samples1": ["94", 0], "samples2": ["3", 0], "dim": "t"}},
+    "80":  {"class_type": "VAEDecode", "inputs": {"samples": ["95", 0], "vae": ["39", 0]}},
+    "96":  {"class_type": "ImageFromBatch", "inputs": {"image": ["80", 0], "batch_index": 4, "length": 4096}},
+    "82":  {"class_type": "CreateVideo", "inputs": {"images": ["96", 0], "audio": ["58", 0], "fps": 16}},
+    "113": {"class_type": "SaveVideo", "inputs": {"video": ["82", 0], "filename_prefix": "FRAMEFORGE/s2v", "format": "auto", "codec": "auto"}}
+  }
+}

@@ -1,6 +1,6 @@
 # FRAMEFORGE — Project Status
 
-Last updated: 2026-10-16 (RTX 4090 laptop: SDXL references, Simple/Advanced UI)
+Last updated: 2026-10-16 (RTX 4090 laptop: Wan 2.2 S2V lip-sync GPU render mode)
 
 ## Current phase
 
@@ -29,7 +29,7 @@ and style answers pending).
 | 2 UI + ComfyUI integration | **Built and tested against a stand-in ComfyUI, 2026-10-16.** Real-engine validation pending. | Full ComfyUI API client (HTTP + WebSocket), versioned workflow templates, background job runner with cancel/retry/resume, jobs API, WebSocket events, generation UI with live progress and previews. 26 backend tests pass; UI verified in the browser against the stand-in. **Not yet run against a real ComfyUI**; the two templates are marked `validated: false`. |
 | 3 Script & production planning | **Done (CPU and GPU share it)** | `ProductionPlan` schema, Ollama JSON-schema planner, outline + per-scene passes, length top-up, editable in advanced mode. Tested with stand-in and live `qwen3:4b`. |
 | 4 Dialogue & voices | **Done** | Kokoro worker (own venv), per-line WAV + word timestamps, timeline with pauses/scene gaps, mixed dialogue track. Tested live. |
-| 5 Character animation & lip sync | **CPU mode done; GPU mode not built** | CPU: rembg cutouts, OpenCV cat/human face boxes, audio-envelope jaw/mouth, blinks, head motion, listener reactions. GPU (Wan 2.2 S2V / InfiniteTalk) pending the 5080 PC. |
+| 5 Character animation & lip sync | **CPU and GPU modes done** | CPU: rembg cutouts, OpenCV cat/human face boxes, audio-envelope jaw/mouth, blinks, head motion, listener reactions. GPU: Wan 2.2 S2V talking shots with real lip-sync, validated live on an RTX 4090 Laptop (~103 s per 4.8 s chunk); RTX 5080 run pending. |
 | 6 Automated scene generation | **CPU mode done; GPU mode not built** | Shot planner (establishing, shot/reverse-shot, reaction cut-ins, two-shots) from the timeline; references via ComfyUI; checkpointed. GPU shot rendering pending. |
 | 7 Editing & final render | **Done** | FFmpeg assembly: subtitles (SRT burn-in), procedural music mix, libx264/aac, ffprobe QC (duration/streams). In-app preview + download. |
 | 8 Full 10-minute production | Partly | Pipeline is checkpointed and resumable; planner scales scenes by duration. Not yet exercised beyond ~1 minute; no ETA/VRAM telemetry yet. |
@@ -112,8 +112,30 @@ Outstanding:
   `files/...?download=true` sends a Content-Disposition attachment named after the project.
 - Aspect ratio is stored but the CPU animator always renders 16:9; Simple hides it, Advanced labels it.
 - Tests: 40/40. `conftest.py` also pins `IMAGE_WORKFLOW` and `RENDER_MODE` against `.env` leaks.
-- Next on this machine: the GPU animate path (Wan 2.2 S2V, Phase 0 tests T1–T7), which this laptop can
-  run as a 5080 stand-in; per-shot regeneration; character/environment consistency across shots.
+- **GPU lip-sync (Phase 5 GPU mode, built and run live):** `FRAMEFORGE_RENDER_MODE=gpu` renders every
+  speaking shot with Wan 2.2 S2V 14B fp8 (`video_wan22_s2v.v1`, validated) from the shot's first frame
+  (procedural compositor, mouth closed) + the line's audio slice; reaction/establishing shots stay
+  procedural; clips are checkpointed in `render/s2v/` and spliced in by the animator. Why: the user
+  reported wrong lip movement; root causes were (1) OpenCV 5 removed `CascadeClassifier`, so face
+  detection silently fell back to a guess and drew the mouth on the nose, and (2) even OpenCV 4 cascades
+  miss SDXL 3D cats. OpenCV is now pinned `<5` in `install-workers.ps1`, but the procedural mouth is no
+  longer used for speech in GPU mode.
+- **Phase 0 T5 measurements (RTX 4090 Laptop 16 GB, ComfyUI 0.41, torch 2.14 cu130):**
+
+  | S2V setting | per 77-frame chunk (4.8 s) | notes |
+  |---|---|---|
+  | 4 steps + lightx2v LoRA, 848x480 | 95–110 s (103 s steady) | stable framing, lips track audio (mouth darkness vs RMS r=0.56 at lag 0) |
+  | 4 steps + LoRA, 1024x576 | ~180 s | used for "final" quality |
+  | 20 steps, CFG 6, no LoRA, 848x480 | ~905 s | more expressive (teeth, smiles) but heads turn away and drift out of frame |
+
+  Peak VRAM ~14.5 GB in all cases.
+- **Live GPU render of the café video (60 s, draft):** 16 speaking shots, 18 chunks, 32 min animate
+  (now 16 chunks: shots up to 0.5 s past a chunk hold the last frame instead of paying ~105 s for another);
+  assemble QC passed (57.7 s, 12 cues). GPU mode never uses two-shots (one face per spoken shot) and
+  frames medium shots tighter (MEDIUM_SCALE 1.0) so mouths have enough pixels.
+- Install: `scripts\install-comfyui-gpu.ps1 -S2V` downloads the ~24 GB of S2V models.
+- Next: per-shot regeneration in the UI (redo one clip), optional frame interpolation 16→24 fps (frames
+  are duplicated now), S2V for reaction shots (listener idle motion), and testing on the RTX 5080.
 
 ## Handoff — where to pick up on the next machine
 
