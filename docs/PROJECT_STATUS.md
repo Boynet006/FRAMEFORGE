@@ -73,6 +73,23 @@ Outstanding:
 - Verified only with ComfyUI absent; the "connected" branch of the ComfyUI card is untested
   until ComfyUI runs.
 
+## Handoff — where to pick up on the next machine
+
+Clone the repo, follow README "Continue on another computer", start the three servers, then:
+
+1. **Verify the first full live render.** On the dev machine the one-click pipeline completed
+   script → voices → references live; animate failed once because the backend process had a stale
+   PATH without FFmpeg (fixed: `Settings.resolved_ffmpeg` finds the winget install). A re-run was
+   started at the end of the last session; the result was not yet reviewed. Create a project
+   (60 s, two cats), press "Generate complete video", and watch `render/final.mp4` in the workspace.
+   Judge: mouth movement follows speech, cuts between speakers, subtitles readable, music under dialogue.
+2. **Known rough edges to tune after watching:** mouth/jaw placement when the face box is wrong
+   (the animator logs `face box` per character on stderr), character scale/position in two-shots,
+   listener reaction timing, music volume (`plan.music.volume_db`).
+3. **Then:** per-shot regeneration UI, a `stage` label on jobs (needs a DB column + migration),
+   project history/reusable characters (Phase 9), and the RTX 5080 GPU path (Phase 0 tests
+   T1–T7 from `PHASE0_ENVIRONMENT_REPORT.md`, then a `video_*`/S2V animate engine).
+
 ## CPU-mode build notes (2026-10-16)
 
 - Installed on the dev machine: Python 3.12, Ollama 0.40 + `qwen3:4b`, FFmpeg 9 full, ComfyUI 0.41

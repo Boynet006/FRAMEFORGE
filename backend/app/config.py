@@ -70,6 +70,34 @@ class Settings(BaseSettings):
     def _strip_slash(cls, v: str) -> str:
         return v.rstrip("/")
 
+    def _resolve_tool(self, name: str) -> str:
+        """Find ffmpeg/ffprobe even when this process inherited a PATH from before the install
+        (winget updates the registry PATH, not running processes)."""
+        import os
+        import shutil
+
+        if Path(name).is_absolute() or shutil.which(name):
+            return name
+        candidates: list[Path] = []
+        local = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Packages"
+        if local.exists():
+            candidates += list(local.glob(f"Gyan.FFmpeg*/**/bin/{Path(name).stem}.exe"))
+        for p in (Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "ffmpeg" / "bin",
+                  Path(r"C:\ffmpeg\bin")):
+            candidates.append(p / f"{Path(name).stem}.exe")
+        for c in candidates:
+            if c.exists():
+                return str(c)
+        return name
+
+    @property
+    def resolved_ffmpeg(self) -> str:
+        return self._resolve_tool(self.ffmpeg)
+
+    @property
+    def resolved_ffprobe(self) -> str:
+        return self._resolve_tool(self.ffprobe)
+
     @property
     def resolved_tts_python(self) -> str:
         p = self.tts_python

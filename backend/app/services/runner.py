@@ -321,11 +321,12 @@ class JobRunner:
             with SessionLocal() as s:
                 project = s.get(Project, out.project_id)
                 quality = str((project.settings if project else {}).get("quality") or "draft")
-            engine = AnimateEngine(self.settings.resolved_tts_python, self.settings.ffmpeg)
+            engine = AnimateEngine(self.settings.resolved_tts_python, self.settings.resolved_ffmpeg)
             return await engine.run(plan, project_dir, quality, progress=progress,
                                     max_seconds=float(payload.get("max_seconds") or 0))
         if stage == "assemble":
-            engine = AssembleEngine(self.settings.resolved_tts_python, self.settings.ffmpeg, self.settings.ffprobe)
+            engine = AssembleEngine(self.settings.resolved_tts_python, self.settings.resolved_ffmpeg,
+                                    self.settings.resolved_ffprobe)
             return await engine.run(plan, project_dir, progress=progress)
         raise ValueError(f"unknown stage {stage}")
 
